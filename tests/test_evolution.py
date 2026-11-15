@@ -66,6 +66,37 @@ def test_evolution_rewrites_world_and_reload_matches(tmp_path):
                            rtol=0, atol=1e-3), n
 
 
+def _fake_grid():
+    """Canned MIST stand-in so the mass-update branch (props present) runs
+    in tests - production-only AttributeErrors hid there before (the
+    'NBodySimulation has no particles' job crash, 2026-11-15)."""
+    class P:
+        def __init__(self):
+            self.mass_msun = 1.29
+            self.radius_m = 9.26e8
+            self.luminosity_w = 2.8e26
+            self.teff_k = 6474.0
+    class G:
+        def evaluate(self, m, feh, age):
+            return P()
+    return G()
+
+
+def test_job_runs_with_stellar_props_present(tmp_path):
+    """The evolution cadence must update masses on BOTH the live sim and
+    restored copies without crashing (duck-typed particles access)."""
+    ws = Workspace(build_preset(), grid_getter=_fake_grid)
+    path = world_mod.save_world(build_preset(), tmp_path / "props")
+    job = EvolutionJob(ws, path, duration_days=40.0, speed_days_per_s=1e5)
+    job.start()
+    assert job.wait(timeout=60)
+    assert job.state == "done", job.error
+    # non-destructive sampling with props present must also leave t intact
+    t0 = ws.sim.t_s
+    ws.flux_series_forward("Αύρα", 365.25, 5)
+    assert ws.sim.t_s == t0
+
+
 def test_autosave_happens_during_run(tmp_path):
     ws = Workspace(build_preset(), grid_getter=None)
     path = world_mod.save_world(build_preset(), tmp_path / "autosave")
@@ -79,6 +110,44 @@ def test_autosave_happens_during_run(tmp_path):
     job.cancel()
     assert job.wait(timeout=30)
     assert job.state == "cancelled"
+
+
+def test_flux_series_forward_is_non_destructive():
+    """INCIDENT 2026-11-15 (client-server desync): the temperature query
+    advanced the LIVE integrator, killing a running evolution job (sim.t
+    overshot end_days -> 'done') while physics kept moving. Temperature
+    sampling must run on a restored copy and leave sim.t bit-exact."""
+    ws = Workspace(build_preset(), grid_getter=None)
+    ws.state_at(10.0)
+    t0 = ws.sim.t_s
+    rows = ws.flux_series_forward("Múspellsheimr", 3652.5, 13)
+    assert ws.sim.t_s == t0, "temperature sampling moved the live clock!"
+    assert len(rows) == 13
+    assert rows[0]["d"] == pytest.approx(t0 / (3600 * 24), rel=1e-9)
+    # first sample matches the live illumination at the current time
+    live = ws.flux_at("Múspellsheimr", t0 / (3600 * 24))["illumination"]["total"]
+    assert rows[0]["flux"] == pytest.approx(live, rel=1e-6)
+
+
+def test_job_aborts_loudly_on_external_clock_move(tmp_path):
+    """If anything moves the shared clock between chunks, the job must
+    abort with a LOUD error and skip the final save - never report a
+    phantom 'done' and never keep integrating into a corrupted timeline."""
+    ws = Workspace(build_preset(), grid_getter=None)
+    path = world_mod.save_world(build_preset(), tmp_path / "desync")
+    job = EvolutionJob(ws, path, duration_days=1e5, speed_days_per_s=2.0)
+    job.start()
+    time.sleep(1.0)
+    # external interference: a query mutating the live integrator (+50 d).
+    # NB: state_at acquires ws.lock itself - do NOT wrap it (non-reentrant).
+    ws.state_at(ws.sim.t_s / (3600 * 24) + 50.0)
+    assert job.wait(timeout=30)
+    assert job.state == "error"
+    assert "moved externally" in job.error
+    # the abort must skip the final save: no writes after the abort settles
+    mtime = path.stat().st_mtime
+    time.sleep(1.2)
+    assert path.stat().st_mtime == mtime, "final save was written after abort"
 
 
 def test_control_rules_pause_cancel_speed(tmp_path):

@@ -43,7 +43,7 @@ export async function showBody(name) {
     ? `#${teffColor(b.extra?.teff_k ?? 5772).getHexString()}` : "#7aa2e8";
 
   // prefetch osculating data so renderParams can prefer live elements
-  try { lastBodyData = await api.body(name, ctx.getTimeDays()); }
+  try { lastBodyData = await api.body(name, null); }   // null = 当前时刻(锁内解析)
   catch { lastBodyData = null; }
   if (current !== body) return;   // stale: a newer showBody won
   renderParams(b);
@@ -113,7 +113,7 @@ async function refreshIrradiation(force = false) {
   lastIrrAt = now;
   const body = current;
   let d;
-  try { d = await api.body(body, days); }
+  try { d = await api.body(body, null); }   // null = 当前时刻(锁内解析,不拨动活时钟)
   catch { return; }             // transient: keep the previous irradiation readout
   if (body !== current) return;
   lastBodyData = d;
@@ -353,7 +353,7 @@ function renderAtmosphere(b) {
     if (e.target.value) drawGases(GAS_PRESETS[e.target.value]);
   });
   $("#at-estimate").addEventListener("click", async () => {
-    const d = await api.body(current, ctx.getTimeDays());
+    const d = await api.body(current, null);
     const t0 = d.t_eq_k;
     const tau0 = parseFloat($("#at-tau0").value);
     const nabla = parseFloat($("#at-nabla").value);

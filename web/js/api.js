@@ -29,7 +29,11 @@ export const api = {
   system: () => jget("/api/system"),
   state: (tDays) => tDays == null ? jget("/api/state")
                                   : jget(`/api/state?t_days=${tDays}`),
-  body: (name, tDays) => jget(`/api/body/${encodeURIComponent(name)}?t_days=${tDays}`),
+  // tDays=null -> 'current time' resolved INSIDE the server lock, so a
+  // slow poll never scrubs the live clock back to its stale timestamp
+  body: (name, tDays) => tDays == null
+    ? jget(`/api/body/${encodeURIComponent(name)}`)
+    : jget(`/api/body/${encodeURIComponent(name)}?t_days=${tDays}`),
   structure: (name, req) => jpost(`/api/body/${encodeURIComponent(name)}/structure`, req),
   temperature: (name, req) => jpost(`/api/body/${encodeURIComponent(name)}/temperature`, req),
   starStatus: () => jget("/api/star/status"),

@@ -159,7 +159,7 @@ def get_state(t_days: float | None = None):
 
 
 @app.get("/api/body/{name}")
-def get_body(name: str, t_days: float = 0.0):
+def get_body(name: str, t_days: float | None = None):
     b = SYSTEM.bodies.get(name)
     if b is None:
         raise HTTPException(404, f"no body '{name}'")
@@ -247,24 +247,19 @@ def temperature(name: str, req: TempReq):
     if b is None:
         raise HTTPException(404, f"no body '{name}'")
 
-    # Sample FORWARD FROM THE CURRENT sim time (irreversible-epoch
-    # semantics, 2026-11-15): looking back across the evolution boundary
-    # would force giant leap-backs (measured 12 s stalls) and contradict
-    # "the save has moved on". Rows carry absolute sim days.
-    base = WS.sim.t_s / DAY
-
-    def sample(d):
-        try:
-            ill = WS.flux_at(name, d)["illumination"]
-        except IntegrateBudgetExceeded as e:
-            raise HTTPException(413, str(e))
-        return {"d": d, "flux": ill["total"],
-                "T": equilibrium_temperature(ill["total"], albedo=req.albedo,
-                                             regime=req.regime)}
-
-    rows = [sample(base + req.span_days * i / max(req.n - 1, 1)) for i in range(req.n)]
-    n_dense = 400
-    dense = [sample(base + req.span_days * i / (n_dense - 1)) for i in range(n_dense)]
+    # NON-DESTRUCTIVE forward sampling from the current sim time, on a
+    # restored copy (flux_series_forward). INCIDENT 2026-11-15: sampling on
+    # the live sim moved the shared clock - during an evolution this killed
+    # the job (sim.t overshot end_days -> 'done') while physics kept moving,
+    # and interleaved with any new evolution. Rows carry absolute sim days.
+    rows_raw = WS.flux_series_forward(name, req.span_days, req.n)
+    rows = [{"d": r["d"], "flux": r["flux"],
+             "T": equilibrium_temperature(r["flux"], albedo=req.albedo,
+                                          regime=req.regime)} for r in rows_raw]
+    dense_raw = WS.flux_series_forward(name, req.span_days, 400)
+    dense = [{"d": r["d"], "flux": r["flux"],
+              "T": equilibrium_temperature(r["flux"], albedo=req.albedo,
+                                           regime=req.regime)} for r in dense_raw]
     return {"rows": rows, "dense": dense, "albedo": req.albedo, "regime": req.regime}
 
 

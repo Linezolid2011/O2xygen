@@ -73,6 +73,7 @@ async function boot() {
   // snapshots (server snapshots resync it), so slow evolution is SMOOTH
   // instead of jumping once per poll - the "0.5 s per frame" stutter.
   let renderDays = 0, evoSpeedDps = 0;
+  let clockOffset = 0;            // server-vs-render clock error, bled per frame
   let lastSnapDays = 0, lastSnapWall = 0;
   let lastEvolveWatchdog = 0;
   async function pollState() {
@@ -90,22 +91,16 @@ async function boot() {
       const snap = await api.state(null);
       currentDays = snap.t_days;
       if (evolving) {
-        // adaptive rate: EMA of the server's actual advance per wall second
-        // (chunk quantisation makes the configured speed inexact); soft
-        // position correction on top. Together these bound the tracking
-        // error to well under one chunk quantum - no visible hitches.
-        const wall = performance.now();
-        if (lastSnapWall) {
-          const inst = (snap.t_days - lastSnapDays) / ((wall - lastSnapWall) / 1000);
-          if (inst >= 0) evoSpeedDps = evoSpeedDps * 0.5 + inst * 0.5;
-        }
-        lastSnapDays = snap.t_days;
-        lastSnapWall = wall;
-        renderDays += (snap.t_days - renderDays) * 0.25;
+        // the server's average advance rate IS the configured speed (chunks
+        // owe speed*0.4d each and run back to back); an EMA of observed
+        // snap deltas oscillated under bursty responses - configured speed
+        // plus offset bleeding is stable. Never apply corrections in one
+        // shot: the frame loop bleeds clockOffset smoothly.
+        clockOffset = snap.t_days - renderDays;
       } else {
         renderDays = snap.t_days;
+        clockOffset = 0;
         evoSpeedDps = 0;
-        lastSnapWall = 0;
       }
       timeline.setClock(currentDays);
       scene.setSnapshot(snap);
@@ -148,7 +143,12 @@ async function boot() {
   (function frame(now) {
     const dt = Math.min(((now || performance.now()) - lastFrameT) / 1000, 0.25);
     lastFrameT = now || performance.now();
-    if (evolving && evoSpeedDps > 0) renderDays += evoSpeedDps * dt;
+    if (evolving && evoSpeedDps > 0) {
+      renderDays += evoSpeedDps * dt + clockOffset * 0.08;
+    } else if (clockOffset) {
+      renderDays += clockOffset * 0.08;
+    }
+    clockOffset *= 0.92;
     scene.update(renderDays);
     scene.sampleTrails(renderDays);       // smoke scrolls between anchors
     scene.render();
@@ -213,6 +213,7 @@ async function boot() {
   function beginEvolutionUI(st) {
     evolving = true;
     evoSpeedDps = st.speed ?? 0;          // until the estimator takes over
+    clockOffset = 0;
     lastSnapWall = 0;
     lockWorldUI(true);
     timeline.setEvolve(st.end_days - st.start_days, st.speed);
@@ -239,10 +240,12 @@ async function boot() {
     let st;
     try { st = await api.evolveStatus(); } catch { return; }
     timeline.setProgress(st.progress || 0);
-    if (st.state !== "running") {
+    if (st.state === "running") {
+      evoSpeedDps = st.speed;
+    } else {
       evoSpeedDps = 0;                      // freeze exactly
-      lastSnapWall = 0;
       renderDays = st.done_days;
+      clockOffset = 0;
     }
     applyEvolutionState(st);
     if (["done", "cancelled", "error"].includes(st.state)) {

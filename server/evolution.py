@@ -45,6 +45,7 @@ class EvolutionJob:
         self.end_days = t0_days + float(duration_days)
         self.done_days = t0_days
         self.speed = float(speed_days_per_s)
+        self._expected_days = t0_days   # absolute clock the job expects;
         self.state = "running"          # running | paused | done | cancelled | error
         self.error: str | None = None
         self._ctl = threading.Lock()
@@ -124,10 +125,26 @@ class EvolutionJob:
                                self.end_days - sim_now)
                 t0 = time.time()
                 with ws.lock:
+                    # external-clock-move detector: another caller holding
+                    # the lock between our chunks can advance or rewind the
+                    # shared integrator. Continuing would corrupt the
+                    # autosave. Abort LOUDLY, skip the final save.
+                    # INCIDENT 2026-11-15: a temperature query advanced the
+                    # live clock +10 yr per call - the job saw 'done',
+                    # the client went idle, physics kept moving, and the
+                    # next evolution interleaved with the rogue motion.
+                    actual_days = ws.sim.t_s / DAY
+                    drift = actual_days - self._expected_days
+                    if abs(drift) > max(1.0, owe_days):
+                        raise RuntimeError(
+                            f"sim clock moved externally by {drift:.3g} d "
+                            "(a query is mutating the live integrator); "
+                            "evolution aborted, last autosave kept")
                     t_from = ws.sim.t_s
                     t_to = t_from + owe_days * DAY
                     ws._evolve_between(t_from, t_to, record=False)
                     ws.sim.integrate_to(t_to, record_checkpoints=False)
+                    self._expected_days = t_to / DAY
                 self.done_days = ws.sim.t_s / DAY
                 if time.time() >= next_save:
                     self._autosave()
