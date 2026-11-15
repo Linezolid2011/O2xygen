@@ -54,7 +54,9 @@ class Workspace:
             except Exception:
                 continue
             out[s.name] = {"mass_kg": p.mass_msun * M_SUN,
-                           "luminosity_w": p.luminosity_w}
+                           "luminosity_w": p.luminosity_w,
+                           "radius_m": p.radius_m,
+                           "teff_k": p.teff_k}
         return out
 
     def _apply_evolution_at(self, t_s: float) -> bool:
@@ -65,8 +67,11 @@ class Workspace:
             return False
         self.sim.update_masses({n: v["mass_kg"] for n, v in props.items()})
         for n, v in props.items():
-            self.system.bodies[n].luminosity_w = v["luminosity_w"]
-            self.system.bodies[n].mass_kg = v["mass_kg"]
+            b = self.system.bodies[n]
+            b.luminosity_w = v["luminosity_w"]
+            b.mass_kg = v["mass_kg"]
+            b.radius_m = v["radius_m"]            # star visibly swells near turnoff
+            b.extra["teff_k"] = v["teff_k"]       # and reddens
         return True
 
     def _evolve_between(self, t_from: float, t_to: float) -> None:
@@ -125,6 +130,10 @@ class Workspace:
                 "dt_s": float(self.sim.dt_s),
                 "bodies": bodies,
                 "elements": elements,
+                "stars": {s.name: {"teff_k": float(s.extra.get("teff_k", 5772.0)),
+                                   "radius_m": float(s.radius_m),
+                                   "luminosity_w": float(s.luminosity_w)}
+                          for s in self.system.stars()},
                 "trails": self._trails(states, elements, t_s) if with_trails else {},
                 "luminosity_w": {s.name: float(s.luminosity_w)
                                  for s in self.system.stars()},

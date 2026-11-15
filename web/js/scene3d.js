@@ -198,6 +198,28 @@ export class OrbitScene {
     this.snap = snap;
     this.snapT_s = snap.t_days * DAY;
     this.propagator = new NBodyPropagator(snap, snap.dt_s);
+    this._starBase = this._starBase ?? {};      // first snapshot = scale baseline
+    this.updateStars(snap);
+  }
+
+  /** Stellar evolution made visible: swell + redden stars relative to the
+   *  first snapshot's MIST radius/Teff (display-scale factor and colour). */
+  updateStars(snap) {
+    if (!snap.stars) return;
+    for (const b of this.system.bodies) {
+      if (b.kind !== "star") continue;
+      const st = snap.stars[b.name];
+      if (!st) continue;
+      const base = this._starBase[b.name] ?? (this._starBase[b.name] = st.radius_m);
+      const g = this.bodyGroups[b.name];
+      if (g) g.scale.setScalar(Math.max(st.radius_m / base, 1e-3));
+      const c = teffColor(st.teff_k ?? 5772);
+      const mesh = this.bodyMeshes[b.name];
+      if (mesh?.material?.color) mesh.material.color.copy(c);
+      const glow = g?.children.find((ch) => ch.isSprite);
+      if (glow) glow.material.color.copy(c);
+      if (!b.parent) this.starLight.color.copy(c);
+    }
   }
 
   /** Rebuild smoke trails from the snapshot's integrated paths. */
