@@ -1,5 +1,5 @@
 // o2xygen WebUI bootstrap.
-import { api } from "./api.js";
+import { api, errDetail } from "./api.js";
 import { OrbitScene } from "./scene3d.js";
 import { buildCatalog } from "./catalog.js";
 import { initPanels, showBody, onTimeChanged } from "./panels.js";
@@ -22,9 +22,14 @@ async function boot() {
   const worldSel = $("#world-select");
   async function refreshWorlds() {
     const w = await api.worlds();
-    worldSel.innerHTML = w.worlds
-      .map((n) => `<option value="${n}" ${n === w.current ? "selected" : ""}>${n}</option>`)
-      .join("");
+    worldSel.textContent = "";
+    for (const n of w.worlds) {
+      const opt = document.createElement("option");
+      opt.value = n;
+      opt.textContent = n;      // world names come from user-named files
+      if (n === w.current) opt.selected = true;
+      worldSel.appendChild(opt);
+    }
   }
   worldSel.addEventListener("change", async () => {
     await api.worldLoad(worldSel.value);
@@ -113,10 +118,21 @@ async function boot() {
     if (s.ready) hint.textContent = "✓ MIST 网格已就绪";
     else if (s.loading) {
       hint.textContent = "MIST 网格加载中…";
+      let fails = 0;
       const poll = setInterval(async () => {
-        const st = await api.starStatus();
-        if (st.ready) { hint.textContent = "✓ MIST 网格已就绪"; clearInterval(poll); }
-        else if (st.error) { hint.textContent = "MIST 网格加载失败"; clearInterval(poll); }
+        try {
+          const st = await api.starStatus();
+          fails = 0;
+          if (st.ready) { hint.textContent = "✓ MIST 网格已就绪"; clearInterval(poll); }
+          else if (st.error) { hint.textContent = "MIST 网格加载失败"; clearInterval(poll); }
+        } catch {
+          // server hiccup: stop polling after 3 consecutive failures instead
+          // of an unhandled rejection every 10 s
+          if (++fails >= 3) {
+            hint.textContent = "MIST 网格状态查询失败";
+            clearInterval(poll);
+          }
+        }
       }, 10_000);
     }
   }).catch(() => {});
@@ -181,16 +197,20 @@ async function boot() {
     const name = $("#add-name").value.trim();
     if (!name) { $("#add-error").textContent = "请输入名称"; return; }
     if (system.bodies.some((b) => b.name === name)) { $("#add-error").textContent = "名称已存在"; return; }
+    const a = parseFloat($("#add-a").value), e = parseFloat($("#add-e").value),
+          inc = parseFloat($("#add-inc").value), mass = parseFloat($("#add-mass").value);
+    if (![a, e, inc, mass].every(isFinite)) {
+      $("#add-error").textContent = "请输入有效的轨道根数与质量数值";
+      return;
+    }
     const r = await fetch("/api/add_body", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name, around: parentSel.value,
-        a_au: parseFloat($("#add-a").value), e: parseFloat($("#add-e").value),
-        inc_deg: parseFloat($("#add-inc").value),
-        mass_earth: parseFloat($("#add-mass").value),
+        a_au: a, e, inc_deg: inc, mass_earth: mass,
       }),
     });
-    if (!r.ok) { $("#add-error").textContent = (await r.json()).detail; return; }
+    if (!r.ok) { $("#add-error").textContent = await errDetail(r); return; }
     location.reload();
   });
 

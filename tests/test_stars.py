@@ -70,3 +70,17 @@ def test_solar_age_sun(grid):
     p = grid.evaluate(1.0, 0.0, 4.56e9)
     assert p.teff_k == pytest.approx(5772.0, rel=0.03)
     assert p.radius_m == pytest.approx(6.957e8, rel=0.05)
+
+
+def test_evaluate_rejects_off_grid_inputs(grid):
+    """Audit findings A3/B8: absurd initial mass silently returned degenerate
+    track-end values; negative age was silently clipped to 1 Myr. Both must
+    raise now, mirroring the [Fe/H] check."""
+    with pytest.raises(ValueError):
+        grid.evaluate(1.0e6, 0.0, 4.0e9)      # mass far above grid max
+    with pytest.raises(ValueError):
+        grid.evaluate(0.01, 0.0, 4.0e9)       # mass below grid minimum (~0.1)
+    with pytest.raises(ValueError):
+        grid.evaluate(1.0, 0.0, -5.0)         # negative age (was clipped)
+    with pytest.raises(ValueError):
+        grid.evaluate(1.0, 0.0, 1.0e12)       # far above AGE_MAX (was clipped)

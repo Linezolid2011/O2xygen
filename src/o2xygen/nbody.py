@@ -53,7 +53,9 @@ def rv_to_elements(r_vec: np.ndarray, v_vec: np.ndarray, mu: float) -> Osculatin
     e_vec = ((v2 - mu / r) * r_vec - np.dot(r_vec, v_vec) * v_vec) / mu
     e = float(np.linalg.norm(e_vec))
     energy = v2 / 2.0 - mu / r
-    if abs(energy) < 1e-15:
+    # near-parabolic test relative to the local potential scale mu/r (an
+    # absolute threshold misclassifies legitimate very wide orbits)
+    if abs(energy) < 1e-12 * mu / r:
         raise ValueError("parabolic orbit: no semi-major axis")
     a = -mu / (2.0 * energy)
     inc = float(np.arccos(np.clip(h_vec[2] / h, -1.0, 1.0)))
@@ -184,6 +186,15 @@ class NBodySimulation:
             i = bisect_right(cp, t_s) - 1
         else:
             i = 0 if cp[0] >= t_s else (bisect_right(cp, t_s) - 1)
+        # same hang protection as integrate_to, measured from the checkpoint
+        # we would actually restore from
+        need = int(abs(t_s - cp[i]) / self.dt_s) + 1
+        if need > MAX_INTEGRATE_STEPS:
+            raise IntegrateBudgetExceeded(
+                f"query at {(t_s - cp[i])/DAY:.3g} d from the nearest "
+                f"checkpoint needs ~{need} steps > budget "
+                f"{MAX_INTEGRATE_STEPS} (dt={self.dt_s/DAY:.3g} d): "
+                "shrink the span or raise dt")
         sim = self._restore(self._cp_snaps[i], cp[i])
         direction = 1.0 if t_s >= cp[i] else -1.0
         sim.dt = self.dt_s * direction
@@ -200,23 +211,35 @@ class NBodySimulation:
         shared workspace lock (a user-typed span of 1e6 yr at dt=0.17 d is
         billions of steps)."""
         t_s = float(t_s)
+        direction = 1.0 if t_s >= self.sim.t else -1.0
+        # integration is now monotone in the requested direction (checkpoint
+        # targets are anchored to sim.t, never to the archive - see below),
+        # so this step count bounds the actual work done
         need = int(abs(t_s - self.sim.t) / self.dt_s) + 1
         if need > MAX_INTEGRATE_STEPS:
             raise IntegrateBudgetExceeded(
                 f"leap of {(t_s - self.sim.t)/DAY:.3g} d needs ~{need} steps "
                 f"> budget {MAX_INTEGRATE_STEPS} (dt={self.dt_s/DAY:.3g} d): "
                 "shrink the span or raise dt")
-        direction = 1.0 if t_s >= self.sim.t else -1.0
         self.sim.dt = self.dt_s * direction
+        cad = self.checkpoint_every_s
         while (t_s - self.sim.t) * direction > 0.5 * self.dt_s:
             target = t_s
             if record_checkpoints:
+                # next boundary strictly AHEAD of the current time in the
+                # integration direction. Anchoring to sim.t (not to the
+                # archive ends) guarantees we never hop backwards to a stale
+                # checkpoint after an intervening record_checkpoints=False leap
                 if direction > 0:
-                    nxt = self._cp_times[-1] + self.checkpoint_every_s
+                    nxt = np.floor(self.sim.t / cad) * cad + cad
+                    if nxt <= self.sim.t:          # ulp undershoot guard
+                        nxt += cad
                     if nxt < t_s:
                         target = nxt
                 else:
-                    prv = self._cp_times[0] - self.checkpoint_every_s
+                    prv = np.ceil(self.sim.t / cad) * cad - cad
+                    if prv >= self.sim.t:          # ulp overshoot guard
+                        prv -= cad
                     if prv > t_s:
                         target = prv
             self.sim.integrate(target, exact_finish_time=1)
@@ -228,6 +251,10 @@ class NBodySimulation:
                 else:
                     self._cp_times.insert(0, float(self.sim.t))
                     self._cp_snaps.insert(0, snap)
+        # final polish: the loop may exit up to 0.5 dt short of t_s - land
+        # exactly on the requested time
+        if self.sim.t != t_s:
+            self.sim.integrate(t_s, exact_finish_time=1)
 
     # --------------------------------------------------------- physics hooks
     def update_masses(self, mass_kg: dict[str, float]) -> None:
@@ -265,6 +292,10 @@ class NBodySimulation:
         for s in self.system.stars():
             lum = (luminosity_w or {}).get(s.name, s.luminosity_w)
             d = np.linalg.norm(pos - states[s.name][0])
+            if d <= 0.0:
+                raise ValueError(
+                    f"irradiance of '{body_name}' undefined: coincident with "
+                    f"star '{s.name}' (self-irradiation is excluded)")
             out[s.name] = lum / (4.0 * np.pi * d * d)
         out["total"] = float(sum(out.values()))
         return out

@@ -1,78 +1,13 @@
-// Client-side Kepler propagation — viz layer only (server physics is source of truth).
+// Client-side N-body propagator — viz layer only (server physics is source of truth).
+// Velocity Verlet on direct-summation gravity, seeded from a server snapshot
+// (positions, velocities, masses of ALL bodies). This is the render layer
+// between polls (ADR-0015) - unlike linear extrapolation it follows curved
+// orbits, so labels and spheres stay on track even at high playback speeds.
+// Small-N systems only; step = server dt.
 const DAY = 86400.0;
 const AU = 1.495978707e11;
 const G = 6.67430e-11;
-const M_SUN = 1.98847e30;
 
-export function gm(massKg) { return G * massKg; }
-
-export function solveKepler(M, e) {
-  M = ((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-  let E = e < 0.8 ? M : Math.PI;
-  for (let i = 0; i < 60; i++) {
-    const dE = -(E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
-    E += dE;
-    if (Math.abs(dE) < 1e-13) break;
-  }
-  return E;
-}
-
-// position (m) relative to parent, from elements
-export function localPos(el, mu, tS) {
-  const n = Math.sqrt(mu / el.a_m ** 3);
-  const E = solveKepler(el.m0 + n * tS, el.e);
-  const r = el.a_m * (1 - el.e * Math.cos(E));
-  const xp = el.a_m * (Math.cos(E) - el.e);
-  const yp = el.a_m * Math.sqrt(1 - el.e * el.e) * Math.sin(E);
-  const ci = Math.cos(el.inc), si = Math.sin(el.inc);
-  const co = Math.cos(el.raan), so = Math.sin(el.raan);
-  const cw = Math.cos(el.argp), sw = Math.sin(el.argp);
-  return {
-    x: (co * cw - so * sw * ci) * xp + (-co * sw - so * cw * ci) * yp,
-    y: (so * cw + co * sw * ci) * xp + (-so * sw + co * cw * ci) * yp,
-    z: sw * si * xp + cw * si * yp,
-    r,
-  };
-}
-
-export function makePropagator(system) {
-  // system: {bodies: [{name, kind, parent, mass_kg, elements}]} — elements may be null
-  const byName = {};
-  for (const b of system.bodies) byName[b.name] = b;
-
-  function absPos(name, tS) {
-    const b = byName[name];
-    if (!b) return { x: 0, y: 0, z: 0 };
-    if (!b.parent || !b.elements) return { x: 0, y: 0, z: 0 };
-    const parent = absPos(b.parent, tS);
-    const mu = gm(byName[b.parent].mass_kg);
-    const local = localPos(b.elements, mu, tS);
-    return { x: parent.x + local.x, y: parent.y + local.y, z: parent.z + local.z };
-  }
-
-  function orbitPath(name, nSamples = 256) {
-    const b = byName[name];
-    if (!b || !b.parent || !b.elements) return null;
-    const mu = gm(byName[b.parent].mass_kg);
-    const T = 2 * Math.PI * Math.sqrt(b.elements.a_m ** 3 / mu);
-    const pts = [];
-    for (let i = 0; i <= nSamples; i++) {
-      const t = (T * i) / nSamples;
-      const parent = absPos(b.parent, t);
-      const local = localPos(b.elements, mu, t);
-      pts.push([parent.x + local.x, parent.y + local.y, parent.z + local.z]);
-    }
-    return pts;
-  }
-
-  return { absPos, orbitPath, byName };
-}
-
-// Client-side N-body propagator: velocity Verlet on direct-summation gravity,
-// seeded from a server snapshot (positions, velocities, masses of ALL bodies).
-// This is the render layer between polls (ADR-0015) - unlike linear
-// extrapolation it follows curved orbits, so labels and spheres stay on track
-// even at high playback speeds. Small-N systems only; step = server dt.
 export class NBodyPropagator {
   constructor(snap, stepS) {
     this.names = Object.keys(snap.bodies);
@@ -95,7 +30,10 @@ export class NBodyPropagator {
         const dy = this.p[j][1] - this.p[i][1];
         const dz = this.p[j][2] - this.p[i][2];
         const r2 = dx * dx + dy * dy + dz * dz;
-        const inv = 1 / (r2 * Math.sqrt(r2));
+        // epsilon floor: coincident bodies must not yield 1/0 -> NaN/Infinity
+        // (1 m^2 is invisible at AU scales but keeps the integrator finite)
+        const r2f = r2 + 1.0;
+        const inv = 1 / (r2f * Math.sqrt(r2f));
         const f = G * this.m[j] * inv;
         a[i][0] += f * dx; a[i][1] += f * dy; a[i][2] += f * dz;
       }
@@ -106,6 +44,7 @@ export class NBodyPropagator {
   propagateTo(tS) {
     let remaining = Math.abs(tS - this.t);
     const dir = tS >= this.t ? 1 : -1;
+    let advanced = 0;
     let guard = 2_000_000;
     while (remaining > 1e-9 && guard-- > 0) {
       const h = Math.min(this.step, remaining) * dir;
@@ -123,8 +62,11 @@ export class NBodyPropagator {
       }
       this.a = aNew;
       remaining -= Math.abs(h);
+      advanced += Math.abs(h);
     }
-    this.t = tS;
+    // only claim the target time if we actually reached it; if the step
+    // budget ran out, report the time truly integrated to (callers re-seed)
+    this.t = remaining <= 1e-9 ? tS : this.t + dir * advanced;
   }
 
   pos(name) {
@@ -133,10 +75,4 @@ export class NBodyPropagator {
   }
 }
 
-export function periodDays(body, parentMassKg) {
-  if (!body.elements || !parentMassKg) return null;
-  const T = 2 * Math.PI * Math.sqrt(body.elements.a_m ** 3 / gm(parentMassKg));
-  return T / DAY;
-}
-
-export { DAY, AU, M_SUN };
+export { DAY, AU };

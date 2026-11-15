@@ -18,12 +18,16 @@ SUBSTELLAR = 1.0      # substellar point: S
 _REGIMES = {"fast_rotator": FAST_ROTATOR, "dayside": DAYSIDE, "substellar": SUBSTELLAR}
 
 
-def equilibrium_temperature(flux_wm2: float, albedo: float = 0.0,
-                            regime: str = "fast_rotator",
+def equilibrium_temperature(flux_wm2: float, albedo: float = 0.09,
+                            regime: str = "dayside",
                             greenhouse: float = 0.0) -> float:
     """T_eq such that T^4 = (1 - A)(1 + greenhouse) * S / (k sigma).
 
     greenhouse > 0 models a gray-atmosphere correction multiplicatively on T^4.
+
+    Defaults follow ADR-0009: dayside-average regime, albedo 0.09 (his
+    screenshot calibration: 861.46 W/m^2 <-> 288.238 K). Pass the parameters
+    explicitly when a different convention is wanted.
     """
     k = _REGIMES[regime]
     return ((1.0 - albedo) * (1.0 + greenhouse) * flux_wm2 / (k * SIGMA)) ** 0.25
@@ -44,9 +48,12 @@ def infer_flux_to_t4_factor(flux_wm2: float, temperature_k: float) -> float:
     return t4 * FAST_ROTATOR * SIGMA / flux_wm2
 
 
-def temperature_series(flux_series, albedo: float = 0.0, regime: str = "fast_rotator",
+def temperature_series(flux_series, albedo: float = 0.09, regime: str = "dayside",
                        greenhouse: float = 0.0):
-    """Vectorized version for the 温度曲线 (temperature vs days-from-epoch)."""
+    """Vectorized version for the 温度曲线 (temperature vs days-from-epoch).
+
+    Defaults follow ADR-0009 (same as equilibrium_temperature).
+    """
     f = np.asarray(flux_series, dtype=float)
     return ((1.0 - albedo) * (1.0 + greenhouse) * f /
             (_REGIMES[regime] * SIGMA)) ** 0.25

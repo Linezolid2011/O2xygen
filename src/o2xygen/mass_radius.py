@@ -28,23 +28,41 @@ _EXP_PREM = 1.0 / 3.7
 _EXP_ZENG19 = 0.25
 
 
+def _model_windows(model: str) -> tuple[float, float, float, float, float]:
+    """(mass_exp, m_min, m_max, cmf_min, cmf_max) for a model name."""
+    if model == "prem":
+        return _EXP_PREM, PREM_M_MIN, PREM_M_MAX, PREM_CMF_MIN, PREM_CMF_MAX
+    if model == "zeng2019":
+        return _EXP_ZENG19, ZENG19_M_MIN, ZENG19_M_MAX, ZENG19_CMF_MIN, ZENG19_CMF_MAX
+    raise ValueError(model)
+
+
 def radius_earth_r(mass_earth: float, core_fraction: float,
                    model: str = "prem") -> float:
     """Radius in Earth radii (mean-radius convention)."""
-    if model == "prem":
-        if not (PREM_CMF_MIN <= core_fraction <= PREM_CMF_MAX):
-            raise ValueError(f"CMF {core_fraction} outside PREM range "
-                             f"[{PREM_CMF_MIN}, {PREM_CMF_MAX}]")
-        return (_CMFCOEFF_A - _CMFCOEFF_B * core_fraction) * mass_earth ** _EXP_PREM
-    if model == "zeng2019":
-        return (_CMFCOEFF_A - _CMFCOEFF_B * core_fraction) * mass_earth ** _EXP_ZENG19
-    raise ValueError(model)
+    exp, m_min, m_max, c_min, c_max = _model_windows(model)
+    # negative mass with a fractional exponent would silently produce a
+    # complex radius; reject non-positive mass outright
+    if mass_earth <= 0.0:
+        raise ValueError(f"mass {mass_earth} must be positive")
+    if not (m_min <= mass_earth <= m_max):
+        raise ValueError(f"mass {mass_earth} outside {model} range "
+                         f"[{m_min}, {m_max}] M_E")
+    if not (c_min <= core_fraction <= c_max):
+        raise ValueError(f"CMF {core_fraction} outside {model} range "
+                         f"[{c_min}, {c_max}]")
+    return (_CMFCOEFF_A - _CMFCOEFF_B * core_fraction) * mass_earth ** exp
 
 
 def infer_core_fraction(mass_earth: float, radius_earth_r: float,
                         model: str = "prem") -> float:
     """Invert the relation: CMF from (M, R)."""
-    exp = _EXP_PREM if model == "prem" else _EXP_ZENG19
+    exp, m_min, m_max, _, _ = _model_windows(model)   # unknown model raises
+    if mass_earth <= 0.0:
+        raise ValueError(f"mass {mass_earth} must be positive")
+    if not (m_min <= mass_earth <= m_max):
+        raise ValueError(f"mass {mass_earth} outside {model} range "
+                         f"[{m_min}, {m_max}] M_E")
     cmf = (_CMFCOEFF_A - radius_earth_r / mass_earth ** exp) / _CMFCOEFF_B
     return cmf
 

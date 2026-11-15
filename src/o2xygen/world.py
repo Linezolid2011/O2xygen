@@ -78,7 +78,7 @@ def dict_to_system(d: dict) -> System:
         raise ValueError(f"not an o2xygen world (format={d.get('format')!r})")
     if int(d.get("version", 0)) > VERSION:
         raise ValueError(f"world version {d['version']} > supported {VERSION}")
-    sys = System(d["name"], origin=d.get("origin"))
+    system = System(d["name"], origin=d.get("origin"))
     for bd in d["bodies"]:
         kind = bd["kind"]
         if kind not in (STAR, BODY):
@@ -93,7 +93,7 @@ def dict_to_system(d: dict) -> System:
             extra["mini_msun"] = float(bd["mass_kg"]) / M_SUN
         else:
             albedo = float(bd.get("albedo", 0.0))
-        sys.add(Body(
+        system.add(Body(
             bd["name"], kind,
             mass_kg=float(bd["mass_kg"]),
             pos0=np.array(bd["pos0_m"], dtype=float),
@@ -103,7 +103,7 @@ def dict_to_system(d: dict) -> System:
             rotation_period_s=bd.get("rotation_period_s"),
             extra=extra,
         ))
-    return sys
+    return system
 
 
 def load_world(path: str | Path) -> System:

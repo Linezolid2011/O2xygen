@@ -41,6 +41,8 @@ class System:
         self.epoch_s = 0.0
 
     def add(self, body: Body) -> None:
+        if body.name in self.bodies:
+            raise ValueError(f"duplicate body name {body.name!r}")
         self.bodies[body.name] = body
 
     def stars(self) -> list[Body]:
@@ -62,6 +64,10 @@ def illumination_from_states(system: System, states: dict,
     for s in system.stars():
         lum = (luminosity_w or {}).get(s.name, s.luminosity_w)
         d = np.linalg.norm(pos - states[s.name][0])
+        if d <= 0.0:
+            raise ValueError(
+                f"irradiance of '{body_name}' undefined: coincident with "
+                f"star '{s.name}' (self-irradiation is excluded)")
         out[s.name] = lum / (4.0 * np.pi * d * d)
     out["total"] = float(sum(out.values()))
     return out

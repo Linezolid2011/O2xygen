@@ -66,6 +66,16 @@ def test_temperature_tracks_flux_to_fourth_power():
     assert ratio_t4 == pytest.approx(ratio_flux, rel=1e-9)
 
 
+def test_temperature_defaults_follow_adr_0009():
+    """ADR-0009 (docs/decisions.md): default regime = dayside average, default
+    albedo = 0.09. Before the 2026-11-15 audit the API defaulted to
+    fast_rotator/0.0, silently contradicting the ADR."""
+    T = equilibrium_temperature(861.460022)     # bare call: defaults only
+    assert T == pytest.approx(288.238, abs=0.5)
+    T_series = temperature_series(np.array([861.460022]))
+    assert float(T_series[0]) == pytest.approx(288.238, abs=0.5)
+
+
 # --- Vector C: Múspellsheimr bulk properties ----------------------------------
 M_MUSPEL = 3.15 * M_EARTH
 R_MUSPEL = 1.35032 * R_EARTH_MEAN

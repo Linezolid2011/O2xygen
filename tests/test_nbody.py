@@ -61,8 +61,7 @@ def test_two_body_matches_analytic_kepler(ecc):
     t = 50.0 * YEAR
     nb.integrate_to(t, record_checkpoints=False)
     got = nb.live_state()["planet"][0]
-    want, _ = elements_to_state(sys.bodies["planet"].elements if False else
-                                Elements(a_m=AU, e=ecc, inc=0.5, raan=1.0,
+    want, _ = elements_to_state(Elements(a_m=AU, e=ecc, inc=0.5, raan=1.0,
                                          argp=2.0, m0=0.7),
                                 G * M_SUN, t)
     assert np.allclose(got, want, rtol=1e-5, atol=1e4)
@@ -222,6 +221,45 @@ def test_leap_budget_rejects_absurd_spans():
     nb.integrate_to(30 * DAY)
 
 
+def test_state_at_budget_rejects_absurd_queries():
+    """state_at must raise the same way integrate_to does: restoring from a
+    checkpoint and integrating an absurd span would hang just as surely."""
+    sys = five_body_system()
+    nb = NBodySimulation(sys)
+    far = MAX_INTEGRATE_STEPS * nb.dt_s * 2
+    with pytest.raises(IntegrateBudgetExceeded):
+        nb.state_at(far)
+
+
+def test_checkpoint_targets_never_hop_backward():
+    """After a record_checkpoints=False leap, a checkpointed request must not
+    rewind to a stale archive boundary (2026-11-15 audit finding A2): the
+    next target is anchored to sim.t, so the sim advances monotonically."""
+    sys = five_body_system()
+    nb = NBodySimulation(sys)
+    nb.integrate_to(400.0 * DAY, record_checkpoints=False)
+    assert nb._cp_times == [0.0]
+    nb.integrate_to(430.0 * DAY)
+    assert nb.t_s == pytest.approx(430.0 * DAY, abs=1e-9)
+    # the next boundary ahead of t=400 d is beyond 430 d, so the call goes
+    # straight to the target: no backward hop, no stale checkpoints appended
+    assert nb._cp_times == [0.0]
+
+
+def test_integrate_to_lands_exactly_on_request():
+    """The final polish step must land exactly on t_s even when the loop
+    exits within 0.5 dt of the target (2026-11-15 audit finding B3)."""
+    sys = five_body_system()
+    nb = NBodySimulation(sys)
+    t_req = 2 * nb.checkpoint_every_s + 0.4 * nb.dt_s
+    nb.integrate_to(t_req)
+    assert nb.t_s == pytest.approx(t_req, abs=1e-9 * DAY)
+    # backward direction too
+    t_back = t_req - 0.3 * nb.dt_s
+    nb.integrate_to(t_back)
+    assert nb.t_s == pytest.approx(t_back, abs=1e-9 * DAY)
+
+
 def test_illumination_from_live_state():
     sys = five_body_system()
     nb = NBodySimulation(sys)
@@ -229,3 +267,15 @@ def test_illumination_from_live_state():
     st = nb.live_state()
     d = np.linalg.norm(st["M1"][0] - st["S"][0])   # exact geometry, no guessing
     assert ill["total"] == pytest.approx(L_SUN / (4 * np.pi * d * d), rel=1e-9)
+
+
+def test_illumination_of_star_itself_raises():
+    """Self-irradiation is excluded (his footnote); a coincident body must
+    raise instead of returning inf (which would 500 the JSON API)."""
+    sys = five_body_system()
+    nb = NBodySimulation(sys)
+    with pytest.raises(ValueError):
+        nb.illumination("S")
+    from o2xygen.system import illumination_from_states
+    with pytest.raises(ValueError):
+        illumination_from_states(sys, sys.initial_states(), "S")

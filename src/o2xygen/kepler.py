@@ -27,6 +27,8 @@ class Elements:
     m0: float = 0.0
 
     def __post_init__(self):
+        if self.a_m <= 0.0:
+            raise ValueError(f"semi-major axis must be positive (got {self.a_m})")
         if not (0.0 <= self.e < 1.0):
             raise ValueError("only bound elliptic orbits supported (0 <= e < 1)")
 

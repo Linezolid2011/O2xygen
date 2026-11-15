@@ -83,7 +83,7 @@ export function initTimeline(callbacks) {
   spanIn.addEventListener("keydown", (e) => { if (e.key === "Enter") spanIn.blur(); });
   playBtn.addEventListener("click", toggle);
   window.addEventListener("keydown", (e) => {
-    if (e.code === "Space" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) {
+    if (e.code === "Space" && !/INPUT|SELECT|TEXTAREA|BUTTON|A/.test(document.activeElement.tagName)) {
       e.preventDefault();
       toggle();
     }

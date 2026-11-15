@@ -1,4 +1,4 @@
-# O₂xygen
+﻿# O₂xygen
 
 世界观构造工作台 —— 面向小说设定的实时恒星系统物理沙盒。
 版本见 `docs/version.txt`(唯一真源,ADR-0003)。
@@ -37,7 +37,7 @@ python -m venv .venv
 .venv/Scripts/python server/app.py        # http://127.0.0.1:8501
 ```
 
-测试(38 项,含对公开参照数值的标定):
+测试(55 项,含对公开参照数值的标定):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -57,7 +57,7 @@ MIST 网格**不随仓库分发**(约 100 MB/金属度)。放置方式:解压
 src/o2xygen/   物理内核(纯 Python,可独立使用)
 server/        FastAPI 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         38 项标定与积分验收测试
+tests/         55 项标定与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)

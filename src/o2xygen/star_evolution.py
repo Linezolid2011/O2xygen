@@ -49,4 +49,9 @@ class StarEstimator:
         if update_mass:
             from .constants import M_SUN
             body.mass_kg = est.props.mass_msun * M_SUN
+            # pin the MIST seed alongside the evolved mass: save_world falls
+            # back to mass_kg/M_SUN when extra["mini_msun"] is absent, which
+            # would otherwise persist the wind-evolved mass as the initial
+            # mass across a save/load cycle
+            body.extra["mini_msun"] = est.initial_mass_msun
         body.luminosity_w = est.props.luminosity_w

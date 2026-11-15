@@ -1,7 +1,7 @@
 // Three.js scene: emissive stars by Teff, integrated-path smoke trails, hierarchy, labels.
 import * as THREE from "three";
 import { OrbitControls } from "/vendor/OrbitControls.js";
-import { makePropagator, NBodyPropagator, AU, DAY } from "./kepler.js";
+import { NBodyPropagator, AU, DAY } from "./kepler.js";
 
 const texLoaderCache = {};
 function glowTexture() {
@@ -38,9 +38,7 @@ export class OrbitScene {
   constructor(canvas, system, callbacks = {}) {
     this.system = system;
     this.cb = callbacks;
-    this.prop = makePropagator(system);
     this.snap = null;             // latest server N-body snapshot (ADR-0015)
-    this.snapT_s = 0;
     this.selected = null;
     this.hover = null;
     this.is2D = false;
@@ -108,8 +106,10 @@ export class OrbitScene {
           map: glowTexture(), color, transparent: true, opacity: 0.55,
           blending: THREE.AdditiveBlending, depthWrite: false,
         }));
-        // glow is a light halo, not a size claim: small floor so stars stay
-        // findable at system zoom, but never larger than the star itself
+        // glow is a light halo around the star, not a size claim (ADR-0017:
+        // the sphere itself is the size claim): a small floor keeps stars
+        // findable at system zoom; the 2.6x factor is deliberate and keeps
+        // the halo visually anchored to the star's own scale
         glow.scale.setScalar(Math.max(R * 2.6, AU * 0.0006));
         group.add(glow);
       } else {
@@ -184,7 +184,6 @@ export class OrbitScene {
   /** Latest server snapshot: live positions/velocities + trails + elements. */
   setSnapshot(snap) {
     this.snap = snap;
-    this.snapT_s = snap.t_days * DAY;
     this.propagator = new NBodyPropagator(snap, snap.dt_s);
     this._starBase = this._starBase ?? {};      // first snapshot = scale baseline
     this.updateStars(snap);
@@ -194,6 +193,9 @@ export class OrbitScene {
    *  first snapshot's MIST radius/Teff (display-scale factor and colour). */
   updateStars(snap) {
     if (!snap.stars) return;
+    // the point light is positioned at the PRIMARY star (see update()) - its
+    // colour must track that same star, whatever the world origin happens to be
+    const primary = this.system.bodies.find((b) => b.kind === "star");
     for (const b of this.system.bodies) {
       if (b.kind !== "star") continue;
       const st = snap.stars[b.name];
@@ -206,7 +208,7 @@ export class OrbitScene {
       if (mesh?.material?.color) mesh.material.color.copy(c);
       const glow = g?.children.find((ch) => ch.isSprite);
       if (glow) glow.material.color.copy(c);
-      if (b.name === this.system.origin) this.starLight.color.copy(c);
+      if (primary && b.name === primary.name) this.starLight.color.copy(c);
     }
   }
 
@@ -247,7 +249,7 @@ export class OrbitScene {
       this.propagator.propagateTo(tS);
       return this.propagator.pos(name);
     }
-    return this.prop.absPos(name, tS);   // pre-first-snapshot fallback
+    return { x: 0, y: 0, z: 0 };   // pre-first-snapshot: bodies sit at the origin
   }
 
   buildGrid() {
@@ -301,8 +303,14 @@ export class OrbitScene {
     this.selected = name;
     for (const [n, div] of Object.entries(this.labelDivs)) {
       div.classList.toggle("sel", n === name);
-      div.innerHTML = n === name
-        ? `${n}<span class="tag">已选择</span>` : n;
+      // names are user-supplied and persisted: textContent, never innerHTML
+      div.textContent = n;
+      if (n === name) {
+        const tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = "已选择";
+        div.appendChild(tag);
+      }
     }
     this.focusOn(name);           // selection recenters the view
   }

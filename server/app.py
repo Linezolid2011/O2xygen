@@ -85,6 +85,17 @@ def _worlds_dir() -> Path:
     return WORLDS_DIR
 
 
+def _check_world_name(name: str) -> str:
+    """World names become file names — refuse anything that could escape
+    WORLDS_DIR (path separators, drive letters, '.'-only names)."""
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(400, "empty world name")
+    if name in (".", "..") or "/" in name or "\\" in name or ":" in name:
+        raise HTTPException(400, f"illegal world name {name!r}")
+    return name
+
+
 def _bootstrap_worlds():
     """First run: materialise the built-in 白玫瑰 world as a real file."""
     if not list(_worlds_dir().glob("*.oxygen")):
@@ -93,7 +104,7 @@ def _bootstrap_worlds():
 
 
 def _load_system(name: str) -> System:
-    path = _worlds_dir() / name
+    path = _worlds_dir() / _check_world_name(name)
     if not path.with_suffix(".oxygen").exists():
         raise HTTPException(404, f"no world '{name}'")
     return world_mod.load_world(path)
@@ -180,10 +191,21 @@ def structure(name: str, req: StructureReq):
     if b is None:
         raise HTTPException(404, f"no body '{name}'")
     m_earth = req.mass_earth if req.mass_earth else b.mass_kg / M_EARTH
+    model_used = req.model
     try:
         r_earth = mass_radius.radius_earth_r(m_earth, req.cmf, model=req.model)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    except ValueError:
+        # small bodies (moons) sit below the PREM fit window but inside the
+        # wider Zeng(2019)-class window - serve them with the extended model
+        # instead of erroring out of the one-click pipeline
+        if req.model == "zeng2019":
+            raise
+        model_used = "zeng2019"
+        try:
+            r_earth = mass_radius.radius_earth_r(m_earth, req.cmf,
+                                                 model=model_used)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     r_m = r_earth * R_EARTH_MEAN
     m_kg = m_earth * M_EARTH
     rho = m_kg / (4 / 3 * np.pi * r_m**3)
@@ -202,7 +224,7 @@ def structure(name: str, req: StructureReq):
                     "r1": l["radius_range_frac"][1],
                     "rho_g_cm3": l["mean_density_kg_m3"] / 1000.0}
                    for l in layers],
-        "model": req.model,
+        "model": model_used,
     }
 
 
@@ -369,7 +391,7 @@ def load_world(req: WorldReq):
 
 @app.post("/api/world/save")
 def save_world(req: WorldReq):
-    name = req.name.strip() or CURRENT_WORLD
+    name = _check_world_name(req.name) if req.name.strip() else CURRENT_WORLD
     path = world_mod.save_world(SYSTEM, _worlds_dir() / name)
     return {"ok": True, "world": path.stem}
 

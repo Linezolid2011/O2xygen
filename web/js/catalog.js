@@ -18,17 +18,27 @@ export function buildCatalog(system, onSelect) {
 
   function render() {
     ul.innerHTML = "";
+    for (const k of Object.keys(items)) delete items[k];   // drop stale detached rows
     const q = filter.value.trim().toLowerCase();
     for (const b of system.bodies) {
       if (q && !b.name.toLowerCase().includes(q)) continue;
       const li = document.createElement("li");
       li.dataset.name = b.name;
       const isOrigin = system.origin === b.name;
-      li.innerHTML = `
-        <span class="child-mark">${isOrigin ? "◎" : ""}</span>
-        <span class="dot" style="background:${kindColor(b)}"></span>
-        <span class="bname">${b.name}</span>
-        <span class="bkind">${b.kind === "star" ? "恒星" : "天体"}</span>`;
+      // names are user-supplied and persisted: textContent, never innerHTML
+      const mark = document.createElement("span");
+      mark.className = "child-mark";
+      mark.textContent = isOrigin ? "◎" : "";
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.background = kindColor(b);
+      const bname = document.createElement("span");
+      bname.className = "bname";
+      bname.textContent = b.name;
+      const bkind = document.createElement("span");
+      bkind.className = "bkind";
+      bkind.textContent = b.kind === "star" ? "恒星" : "天体";
+      li.append(mark, dot, bname, bkind);
       li.style.paddingLeft = "10px";
       li.addEventListener("click", () => onSelect(b.name));
       ul.appendChild(li);

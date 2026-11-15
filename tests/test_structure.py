@@ -56,15 +56,40 @@ def test_muspellsheimr_gravity_pair_via_structure():
 
 # --- flattening -----------------------------------------------------------------
 def test_maclaurin_q_inversion_consistency():
-    """Solve e from q, then q(e) must reproduce q."""
+    """Solve e from q, then q(e) must reproduce q - with q built from the
+    volume-equivalent mean density, the convention flattening_maclaurin uses."""
+    from o2xygen.constants import G
     mu = gm(0.3 * M_EARTH)             # dense small planet, strong rotation
     r = 0.9 * R_EARTH_MEAN
-    omega = 2 * np.pi / (10 * 3600.0)  # keep q < 0.2247 (Maclaurin bifurcation)
+    omega = 2 * np.pi / (100 * 3600.0)  # keep q < 0.2247 (Maclaurin bifurcation)
     f = structure.flattening_maclaurin(mu, r, omega)
-    rho = 3 * mu / (4 * np.pi * 6.67430e-11 * r**3)
-    q = omega**2 / (np.pi * 6.67430e-11 * rho)
+    # volume-equivalent mean density: r_vol^3 = r_eq^3 (1-f)
+    rho = 3 * mu / (4 * np.pi * G * r**3 * (1.0 - f))
+    q = omega**2 / (np.pi * G * rho)
     e = np.sqrt(1 - (1 - f)**2)
     assert structure.maclaurin_q_of_e(e) == pytest.approx(q, rel=1e-8)
+
+
+def test_maclaurin_small_e_is_stable():
+    """Below e ~ 1e-3 the closed form is catastrophic-cancellation garbage
+    (sign chosen by rounding); the series branch must be accurate and
+    positive everywhere (2026-11-15 audit finding B1)."""
+    for e in (1e-12, 1e-9, 1e-6, 1e-4):
+        q = structure.maclaurin_q_of_e(e)
+        assert np.isfinite(q) and q > 0.0
+        assert q == pytest.approx((8.0 / 15.0) * e**2, rel=1e-6)
+    # series branch agrees with the (float-accurate) closed form in the
+    # overlap band around the e = 0.03 crossover
+    for e in (0.02, 0.025, 0.03):
+        q_series = structure.maclaurin_q_of_e(e)
+        s = np.arcsin(e)
+        q_direct = (2.0 * np.sqrt(1 - e**2) * (3 - 2 * e**2) * s / e**3
+                    - 6.0 * (1 - e**2) / e**2)
+        assert q_series == pytest.approx(q_direct, rel=1e-7)
+    # and a very slow rotator must still flatten positively, not raise
+    f = structure.flattening_maclaurin(gm(M_EARTH), R_EARTH_MEAN,
+                                       2 * np.pi / (1000.0 * DAY))
+    assert 0.0 < f < 1e-6
 
 
 def test_slow_rotation_is_maclaurin_limit():
@@ -97,6 +122,44 @@ def test_layered_table_shells_partition_radius():
     assert len(rows) == 4
     assert rows[0]["radius_range_frac"] == (0.0, 0.25)
     assert rows[0]["mean_density_kg_m3"] > rows[-1]["mean_density_kg_m3"]
+
+
+def test_layered_table_shells_conserve_mass():
+    """Shell masses integrated over the FULL shells must sum to M (layer 0
+    used to skip the inner 1e-3 R, mass/volume conventions disagreed)."""
+    rows = structure.layered_density_table(M_EARTH, R_EARTH_MEAN, n_layers=4)
+    total = sum(4.0 * np.pi / 3.0 * R_EARTH_MEAN**3
+                * (r1**3 - r0**3) * row["mean_density_kg_m3"]
+                for row in rows for r0, r1 in [row["radius_range_frac"]])
+    assert total == pytest.approx(M_EARTH, rel=1e-3)
+
+
+# --- mass-radius validation ------------------------------------------------------
+def test_mass_radius_rejects_bad_inputs():
+    """2026-11-15 audit findings B4/B5: window constants existed but were
+    never enforced; negative mass returned a COMPLEX radius."""
+    with pytest.raises(ValueError):
+        mass_radius.radius_earth_r(0.0, 0.3)
+    with pytest.raises(ValueError):
+        mass_radius.radius_earth_r(-1.0, 0.3)          # was complex, silently
+    with pytest.raises(ValueError):
+        mass_radius.radius_earth_r(0.5, 0.3)           # below PREM 1-8 window
+    with pytest.raises(ValueError):
+        mass_radius.radius_earth_r(50.0, 0.3)          # above PREM window
+    with pytest.raises(ValueError):
+        mass_radius.radius_earth_r(3.0, 0.5)           # CMF window still works
+    with pytest.raises(ValueError):
+        mass_radius.radius_earth_r(200.0, 0.3, model="zeng2019")  # > 100 M_E
+    with pytest.raises(ValueError):
+        mass_radius.radius_earth_r(1.0, 1.5, model="zeng2019")    # CMF > 1
+    # unknown model strings: radius raises AND infer must too (was silent)
+    with pytest.raises(ValueError):
+        mass_radius.radius_earth_r(1.0, 0.3, model="nonsense")
+    with pytest.raises(ValueError):
+        mass_radius.infer_core_fraction(3.15, 1.35032, model="nonsense")
+    # window still OK at the edges
+    assert mass_radius.radius_earth_r(1.0, 0.0) > 0.0
+    assert mass_radius.radius_earth_r(8.0, 0.4) > 0.0
 
 
 def test_tof4_cms_notimplemented_yet():

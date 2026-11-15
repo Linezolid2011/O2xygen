@@ -14,7 +14,7 @@ export function tempChart(el, dense, opts = {}) {
   let follow = opts.follow ?? false;
 
   const u = new uPlot({
-    width: el.clientWidth - 4,
+    width: Math.max(50, el.clientWidth - 4),   // hidden tab => clientWidth 0
     height: 190,
     legend: { show: false },
     cursor: { show: false, drag: { x: false, y: false } },
@@ -61,7 +61,7 @@ export function tempChart(el, dense, opts = {}) {
   }
   function setFollow(on) { follow = on; }
   function setSize() {
-    u.setSize({ width: el.clientWidth - 4, height: 190 });
+    u.setSize({ width: Math.max(50, el.clientWidth - 4), height: 190 });
   }
   return { u, setMarker, setFollow, setSize };
 }

@@ -1,5 +1,5 @@
 // Thin fetch wrappers around the FastAPI backend.
-async function errDetail(r) {
+export async function errDetail(r) {
   // non-OK bodies may be plain text ("Internal Server Error") - never let
   // JSON.parse of that kill the app with a confusing SyntaxError
   try {

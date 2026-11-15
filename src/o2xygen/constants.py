@@ -23,7 +23,11 @@ R_EARTH_EQ = 6.378137e6    # m
 S_EARTH = 1361.0           # W/m^2, per his footnote: "S⊕ = 1361 W/m²"
 
 # Derived: sanity check that nominal L_SUN / AU^2 reproduces S_EARTH.
-assert abs(L_SUN / (4 * np.pi * AU**2) - S_EARTH) < 2.0
+# Explicit RuntimeError rather than assert: asserts vanish under python -O.
+if abs(L_SUN / (4 * np.pi * AU**2) - S_EARTH) >= 2.0:
+    raise RuntimeError(
+        f"nominal L_SUN/(4 pi AU^2) = {L_SUN / (4 * np.pi * AU**2):.3f} "
+        f"inconsistent with the S_EARTH fingerprint {S_EARTH}")
 
 
 def gm(mass_kg: float) -> float:

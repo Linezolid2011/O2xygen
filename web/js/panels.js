@@ -13,6 +13,9 @@ let current = null;             // current body name
 let chart = null;               // temperature chart handle
 let lastTempData = null;
 let lastBodyData = null;        // latest /api/body response (osculating etc.)
+let lastIrrDays = null;         // refreshIrradiation throttling state
+let lastIrrAt = 0;
+let paramsNeedsRefresh = false; // params tab fell back to "等待快照…"
 
 export function initPanels(context) {
   ctx = context;
@@ -28,8 +31,10 @@ export function initPanels(context) {
 }
 
 export async function showBody(name) {
+  const body = name;            // capture: selection may change while in flight
   current = name;
   lastBodyData = null;
+  paramsNeedsRefresh = false;
   const b = ctx.system.bodies.find((x) => x.name === name);
   if (!b) return;
   $("#body-name").textContent = b.name;
@@ -40,11 +45,13 @@ export async function showBody(name) {
   // prefetch osculating data so renderParams can prefer live elements
   try { lastBodyData = await api.body(name, ctx.getTimeDays()); }
   catch { lastBodyData = null; }
+  if (current !== body) return;   // stale: a newer showBody won
   renderParams(b);
   renderStructure(b);
   renderAtmosphere(b);
   await renderTemperature(b);
-  await refreshIrradiation();     // fills the 辐照 DOM (element now exists)
+  if (current !== body) return;
+  await refreshIrradiation(true); // fills the 辐照 DOM (element now exists)
   renderIntro(b);
 }
 
@@ -57,8 +64,9 @@ async function renderParams(b) {
   const osc = lastBodyData?.osculating ?? null;
   const T = (lastBodyData && lastBodyData.period_days) ?? null;
   const el2 = osc ? { a_m: osc.a_m, e: osc.e, inc: osc.inc } : null;
-  const kindLabel = b.kind === "star" ? "恒星" : "天体";
   const originName = ctx.system.origin ?? "";
+  // if we must show the snapshot fallback, re-render once irradiation data lands
+  paramsNeedsRefresh = !isOrigin && !el2;
 
   el.innerHTML = `
     <div class="sec">
@@ -91,13 +99,31 @@ async function renderParams(b) {
   if (b.kind === "star") wireStarEstimate(b);
 }
 
-async function refreshIrradiation() {
+async function refreshIrradiation(force = false) {
   // stores lastBodyData (osculating period, flux) for renderParams
   if (!current) return;
+  // throttle: this is driven by the timeline rAF loop while playing — a full
+  // server integration per frame would flood the backend
+  const days = ctx.getTimeDays();
+  const now = performance.now();
+  if (!force && lastIrrDays !== null &&
+      Math.abs(days - lastIrrDays) < 0.5 && now - lastIrrAt < 300) return;
+  lastIrrDays = days;
+  lastIrrAt = now;
+  const body = current;
+  let d;
+  try { d = await api.body(body, days); }
+  catch { return; }             // transient: keep the previous irradiation readout
+  if (body !== current) return;
+  lastBodyData = d;
+  if (paramsNeedsRefresh) {
+    // the params tab was stuck on "等待快照…" - osculating data just arrived
+    paramsNeedsRefresh = false;
+    const b = ctx.system.bodies.find((x) => x.name === body);
+    if (b) renderParams(b);     // rebuilds (and empties) the 辐照 section
+  }
   const el = $("#irradiation-live");
   if (!el) return;
-  const d = await api.body(current, ctx.getTimeDays());
-  lastBodyData = d;
   const rows = Object.entries(d.illumination)
     .filter(([k]) => k !== "total")
     .map(([k, v]) => `<div class="kv"><span class="k">${k}</span><span class="v">${fmt(v, 5)} W/m²</span></div>`)
@@ -334,7 +360,10 @@ function renderAtmosphere(b) {
     const tSurf = t0 * (1 + 0.75 * tau0) ** 0.25;
     const p0 = parseFloat($("#at-p0").value);
     const steps = [1e-4, 1e-2, 0.1, 1, 10];
-    const rows = steps.map((p) => `<tr><td>${p}</td><td>${(tSurf * (p / p0) ** nabla).toFixed(1)}</td></tr>`).join("");
+    // non-finite tau0/nabla/p0 (empty or 0 inputs) must not print "NaN"/"Infinity"
+    const cell = (v) => (isFinite(v) ? v.toFixed(1) : "—");
+    const rows = steps.map((p) =>
+      `<tr><td>${p}</td><td>${cell(tSurf * (p / p0) ** nabla)}</td></tr>`).join("");
     $("#at-result").innerHTML = `
       <div class="kv"><span class="k">平衡温度 (昼侧)</span><span class="v">${fmt(t0, 2)} K</span></div>
       <div class="kv"><span class="k">灰大气表面温度 (估算)</span><span class="v accent">${fmt(tSurf, 1)} K</span></div>
@@ -349,6 +378,7 @@ async function renderTemperature(b) {
   const el = $("#tab-temperature");
   if (b.kind === "star") {
     el.innerHTML = `<div class="note">恒星无温度表。</div>`;
+    chart?.u.destroy();         // release the previous body's chart
     chart = null;
     return;
   }
@@ -402,6 +432,7 @@ async function computeTemp() {
   if (!box) return;
   lastTempData = r;
   box.innerHTML = "";
+  chart?.u.destroy();             // the old uPlot leaks listeners/canvas otherwise
   chart = tempChart(box, r.dense, { markerDays: ctx.getTimeDays(), follow: $("#tp-follow").checked });
   renderTempTable(r);
 }

@@ -133,9 +133,19 @@ class MistGrid:
     def evaluate(self, mini_msun: float, feh: float, age_yr: float) -> StarProperties:
         if not (self.fehs[0] <= feh <= self.fehs[-1]):
             raise ValueError(f"[Fe/H]={feh} outside loaded grid {self.fehs[0]}..{self.fehs[-1]}")
-        logage = float(np.log10(np.clip(age_yr, AGE_MIN, AGE_MAX)))
+        # validate against the ORIGINAL user value - never silently clip:
+        # a clipped age looks like it was accepted but returns a different star
+        if not (AGE_MIN <= age_yr <= AGE_MAX):
+            raise ValueError(f"age {age_yr:.6g} yr outside MIST coverage "
+                             f"[{AGE_MIN:.3g}, {AGE_MAX:.3g}]")
         lo = max([f for f in self.fehs if f <= feh])
         hi = min([f for f in self.fehs if f >= feh])
+        m_lo = min(self._mini_ranges[lo][0], self._mini_ranges[hi][0])
+        m_hi = max(self._mini_ranges[lo][1], self._mini_ranges[hi][1])
+        if not (m_lo <= mini_msun <= m_hi):
+            raise ValueError(f"M_initial={mini_msun:.6g} outside loaded grid "
+                             f"{m_lo:.3g}..{m_hi:.3g} M_sun at [Fe/H] {lo}..{hi}")
+        logage = float(np.log10(age_yr))
         if lo == hi:
             v = self._at_feh(lo, mini_msun, logage)
         else:
@@ -160,11 +170,16 @@ class MistGrid:
         target = np.array([np.log10(luminosity_lsun), np.log10(teff_k)])
 
         def loss(logage):
-            props = self.evaluate(mini_msun, feh, 10.0 ** logage)
+            try:
+                props = self.evaluate(mini_msun, feh, 10.0 ** logage)
+            except ValueError:
+                # optimizer probe landed outside this mass's track coverage
+                # (evaluate is strict now): heavy penalty, keep the search alive
+                return 1.0e6
             got = np.array([np.log10(props.luminosity_w / L_SUN),
                             np.log10(props.teff_k)])
             return float(np.sum((got - target) ** 2))
 
-        res = minimize_scalar(loss, bounds=(np.log10(1e7), np.log10(AGE_MAX)),
+        res = minimize_scalar(loss, bounds=(np.log10(AGE_MIN), np.log10(AGE_MAX)),
                               method="bounded", options={"xatol": 1e-4})
         return 10.0 ** res.x

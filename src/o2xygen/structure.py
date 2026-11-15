@@ -41,7 +41,27 @@ def maclaurin_q_of_e(e: float) -> float:
     """Rotation parameter q = omega^2/(pi G rho) of a Maclaurin spheroid.
 
     q(e) = 2(1-e^2)^{1/2}(3-2e^2)arcsin(e)/e^3 - 6(1-e^2)/e^2
+
+    For e < 0.03 the closed form is the difference of two huge terms
+    (catastrophic cancellation - at e=1e-9 it returns O(1) garbage with a
+    sign that depends on the rounding path), so there we use the Taylor
+    series in u = e^2 instead:
+
+        q = (8/15)u + (8/105)u^2 - (64/3465)u^4 - (1024/45045)u^5
+            - (1024/45045)u^6 - (16384/765765)u^7 - (8192/415701)u^8 + ...
+
+    (coefficients exact; the u^3 term vanishes). Matched against the closed
+    form to ~1e-10 relative at the e = 0.03 crossover.
     """
+    e = float(e)
+    if e <= 0.0:
+        return 0.0
+    if e < 0.03:
+        u = e * e
+        return u * (8.0 / 15.0 + u * (8.0 / 105.0 + u * u * (
+            -64.0 / 3465.0 + u * (-1024.0 / 45045.0 + u * (
+                -1024.0 / 45045.0 + u * (-16384.0 / 765765.0
+                                        + u * -8192.0 / 415701.0))))))
     s = np.arcsin(e)
     return (2.0 * np.sqrt(1.0 - e**2) * (3.0 - 2.0 * e**2) * s / e**3
             - 6.0 * (1.0 - e**2) / e**2)
@@ -50,16 +70,27 @@ def maclaurin_q_of_e(e: float) -> float:
 def flattening_maclaurin(mu: float, r_eq_m: float, omega: float) -> float:
     """Exact Maclaurin spheroid solution: invert q(e) for the eccentricity.
 
-    Uses the mean density of the equivalent-volume sphere; returns f = 1-b/a.
+    q uses the TRUE mean density, i.e. that of the volume-equivalent sphere
+    (radius r_vol = r_eq * (1-f)^{1/3}), not the equatorial-radius density;
+    f is iterated to consistency with that density. Returns f = 1-b/a.
     """
-    rho_mean = 3.0 * mu / (4.0 * np.pi * G * r_eq_m**3)
-    q = omega**2 / (np.pi * G * rho_mean)
-    if q <= 0:
+    if omega == 0.0 or mu <= 0.0 or r_eq_m <= 0.0:
         return 0.0
     q_max = 0.2247                     # bifurcation point of Maclaurin sequence
-    q = min(q, q_max)
-    e = brentq(lambda x: maclaurin_q_of_e(x) - q, 1e-9, 0.95, xtol=1e-12)
-    return 1.0 - np.sqrt(1.0 - e**2)
+    f = 0.0
+    for _ in range(64):
+        rho_mean = 3.0 * mu / (4.0 * np.pi * G * (r_eq_m**3 * (1.0 - f)))
+        q = min(omega**2 / (np.pi * G * rho_mean), q_max)
+        # lower bracket safely below the root even for tiny q (the series
+        # branch keeps q_of_e accurate there)
+        e_lo = min(1e-3, 0.5 * np.sqrt(15.0 * q / 8.0))
+        e = brentq(lambda x: maclaurin_q_of_e(x) - q, e_lo, 0.95, xtol=1e-14)
+        f_new = 1.0 - np.sqrt(1.0 - e**2)
+        if abs(f_new - f) < 1e-14:
+            f = float(f_new)
+            break
+        f = float(f_new)
+    return f
 
 
 def flattening_from_rotation(mu: float, r_eq_m: float, omega: float,
@@ -82,14 +113,15 @@ def polytrope_n1_profile(mass_kg: float, radius_m: float, r_grid=None):
 
     Analytic solution: M = 4 rho_c R^3 / pi  =>  rho_c = pi M / (4 R^3).
     This is his "n=1 是球形多方密度剖面的分层预设".
+
+    np.sinc is exactly sin(pi x)/(pi x) with sinc(0) = 1, so r = 0 is handled
+    without the 0/0 NaN (the old sin(x)/x form forced callers to skip r = 0).
     """
     if r_grid is None:
-        r_grid = np.linspace(1e-6, radius_m, 512)
+        r_grid = np.linspace(0.0, radius_m, 512)
     r_grid = np.asarray(r_grid, dtype=float)
-    x = np.pi * r_grid / radius_m
     rho_c = np.pi * mass_kg / (4.0 * radius_m**3)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        shape = np.sin(x) / x
+    shape = np.sinc(r_grid / radius_m)
     return r_grid, rho_c * shape
 
 
@@ -102,7 +134,9 @@ def layered_density_table(mass_kg: float, radius_m: float, n_layers: int = 4,
     rows = []
     for i in range(n_layers):
         r0, r1 = edges[i], edges[i + 1]
-        rmid = np.linspace(max(r0, 1e-3 * radius_m), r1, 200)
+        # integrate over the FULL shell (from r0, including 0 for layer 0) so
+        # the shell mass matches the shell volume convention below
+        rmid = np.linspace(r0, r1, 200)
         _, rho = polytrope_n1_profile(mass_kg, radius_m, rmid)
         shell_m = np.trapezoid(4.0 * np.pi * rmid**2 * rho, rmid)
         shell_v = 4.0 / 3.0 * np.pi * (r1**3 - r0**3)

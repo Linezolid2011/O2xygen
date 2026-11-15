@@ -42,6 +42,34 @@ def test_round_trip(tmp_path):
             assert rb.albedo == pytest.approx(b.albedo)
 
 
+def test_star_seed_survives_mass_update_round_trip(tmp_path):
+    """Audit finding A1: apply_to_body(update_mass=True) changed mass_kg but
+    never pinned extra['mini_msun']; a fresh in-session world then saved the
+    wind-evolved mass as the MIST seed. The seed must round-trip intact."""
+    from o2xygen.star_evolution import StarEstimator, StarEstimate
+    from o2xygen.stars import StarProperties
+    sys = sample_world()
+    est = StarEstimate(1.29, 1.26e9, 0.10,
+                       StarProperties(mass_msun=1.28, radius_m=9.3e8,
+                                      luminosity_w=2.8e26, teff_k=6474.0,
+                                      mdot_msun_per_yr=1e-13))
+    StarEstimator(grid=None).apply_to_body(sys, "S1", est, update_mass=True)
+    assert abs(sys.bodies["S1"].mass_kg - 1.28 * M_SUN) < 1e-3 * M_SUN
+    path = world_mod.save_world(sys, tmp_path / "evolved")
+    back = world_mod.load_world(path)
+    # stored mass = INITIAL seed, never the evolved current mass
+    assert back.bodies["S1"].extra["mini_msun"] == pytest.approx(1.29)
+    assert back.bodies["S1"].mass_kg == pytest.approx(1.29 * M_SUN, rel=1e-12)
+
+
+def test_duplicate_body_name_rejected():
+    from o2xygen.system import System, Body, STAR
+    sys = System("dup", origin="S")
+    sys.add(Body("S", STAR, mass_kg=M_SUN))
+    with pytest.raises(ValueError):
+        sys.add(Body("S", STAR, mass_kg=M_SUN))
+
+
 def test_rejects_foreign_format(tmp_path):
     p = tmp_path / "bad.oxygen"
     p.write_text('{"format": "something-else", "version": 1}', encoding="utf-8")

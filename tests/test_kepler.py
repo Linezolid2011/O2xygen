@@ -35,6 +35,15 @@ def test_kepler_equation_zero_eccentricity():
         assert solve_kepler(M, 0.0) == pytest.approx(np.mod(M, 2 * np.pi), abs=1e-12)
 
 
+def test_elements_reject_nonpositive_semi_major_axis():
+    """Audit finding B6: negative a_m used to flow through as NaN state
+    vectors with only RuntimeWarnings."""
+    with pytest.raises(ValueError):
+        Elements(a_m=-1.0e11)
+    with pytest.raises(ValueError):
+        Elements(a_m=0.0)
+
+
 def test_placement_matches_elements():
     """ADR-0016 placement tool: a body placed on elements around a reference
     body must carry exactly the elements' relative state (plus the ref's)."""
