@@ -44,9 +44,10 @@ class Workspace:
             return {}
         out = {}
         for s in self.system.stars():
-            mini, feh = s.extra.get("mini_msun"), s.extra.get("feh")
-            age0 = s.extra.get("age0_gyr")
-            if mini is None or age0 is None:
+            # ADR-0016 schema: the stored mass IS the initial mass (MIST seed)
+            mini = s.extra.get("mini_msun", s.mass_kg / M_SUN)
+            feh, age0 = s.extra.get("feh"), s.extra.get("age0_gyr")
+            if age0 is None:
                 continue
             age_yr = age0 * 1e9 + t_s / SECONDS_PER_YEAR
             try:
@@ -109,15 +110,15 @@ class Workspace:
                     "m": float(ps[i].m),
                 }
             elements = {}
-            for name, b in self.system.bodies.items():
-                if b.parent is None:
-                    continue
+            for name in self.system.bodies:
+                if name == self.system.origin:
+                    continue                              # origin has no elements
                 try:
-                    el = self.sim.osculating_elements(name)
+                    el = self.sim.osculating_elements(name)   # vs origin
                 except Exception:
                     continue
                 from o2xygen.constants import G
-                mu = G * (ps[idx[name]].m + ps[idx[b.parent]].m)
+                mu = G * (ps[idx[name]].m + ps[idx[self.system.origin]].m)
                 T = 2 * np.pi * np.sqrt(el.a_m**3 / mu)
                 elements[name] = {
                     "a_m": float(el.a_m), "e": float(el.e),
@@ -148,8 +149,7 @@ class Workspace:
         the live state - the integrator itself is never disturbed. Scrub
         backwards and the smoke correctly trails into negative time.
         """
-        names = [n for n, el in elements.items()
-                 if self.system.bodies[n].parent is not None]
+        names = list(elements.keys())          # elements already exclude the origin
         if not names:
             return {}
         # windows in SECONDS (t_s is seconds - do not mix units!)
@@ -163,8 +163,18 @@ class Workspace:
         sim.dt = -abs(self.sim.dt_s)
         idx = self.sim._index
 
+        # trails are ORIGIN-RELATIVE (render frame, ADR-0016): subtract the
+        # origin body's position at every sample, not just the head
+        oidx = idx.get(self.system.origin)
+
+        def rel(i):
+            p = np.array(ps[i].xyz)
+            q = p - np.array(ps[oidx].xyz) if oidx is not None else p
+            return [float(x) for x in q]
+
         per_body_n = {n: int(round(windows[n] / step)) + 1 for n in names}
-        pts = {n: [[float(x) for x in states[n][0]]] for n in names}
+        ps = sim.particles
+        pts = {n: [None] for n in names}          # head filled below
         counts = {n: 1 for n in names}
 
         t = t_s
@@ -176,8 +186,13 @@ class Workspace:
                 if counts[n] < per_body_n[n]:
                     # sample only while inside this body's window
                     if t >= t_s - windows[n] - step * 0.5:
-                        pts[n].append([float(x) for x in ps[idx[n]].xyz])
+                        pts[n].append(rel(idx[n]))
                         counts[n] += 1
+        # heads at the REQUESTED time t_s (the loop ended at t_end; `states`
+        # holds the absolute t_s states)
+        o_head = states[self.system.origin][0] if self.system.origin else np.zeros(3)
+        for n in names:
+            pts[n][0] = [float(x) for x in (np.asarray(states[n][0]) - o_head)]
         # decimate to <= ~90 points per body (the shared grid over-samples
         # long-window bodies when one short-period body sets the step)
         out = {}

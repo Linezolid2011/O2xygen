@@ -1,10 +1,11 @@
-"""Kepler propagation correctness: circularity, conservation, hierarchy."""
+"""Kepler module correctness (placement tool, ADR-0016): circularity,
+conservation, and placement-vs-elements equivalence."""
 import numpy as np
 import pytest
 
-from o2xygen.constants import gm, DAY, M_EARTH, M_SUN
+from o2xygen.constants import gm, DAY, G, M_EARTH, M_SUN
 from o2xygen.kepler import Elements, elements_to_state, solve_kepler
-from o2xygen.system import System, Body, STAR, PLANET, MOON
+from o2xygen.system import System, Body, STAR, BODY
 
 
 def test_circular_orbit_radius_constant():
@@ -34,27 +35,22 @@ def test_kepler_equation_zero_eccentricity():
         assert solve_kepler(M, 0.0) == pytest.approx(np.mod(M, 2 * np.pi), abs=1e-12)
 
 
-def test_hierarchical_positions_add():
-    """Moon orbits planet orbits star: absolute position = sum of local offsets."""
-    sys = System("test")
+def test_placement_matches_elements():
+    """ADR-0016 placement tool: a body placed on elements around a reference
+    body must carry exactly the elements' relative state (plus the ref's)."""
+    sys = System("test", origin="star")
     sys.add(Body("star", STAR, mass_kg=M_SUN))
-    sys.add(Body("planet", PLANET, parent="star",
-                 elements=Elements(a_m=1e11, e=0.2, m0=1.0), mass_kg=M_EARTH))
-    sys.add(Body("moon", MOON, parent="planet",
-                 elements=Elements(a_m=3.8e8, e=0.05, m0=2.0), mass_kg=7.3e22))
-    for t in (0.0, DAY, 17.3 * DAY):
-        states = sys.state_at(t)
-        rp = states["planet"][0]
-        rm = states["moon"][0]
-        rl, _ = elements_to_state(sys.bodies["moon"].elements, gm(M_EARTH), t)
-        assert np.allclose(rm, rp + rl, rtol=1e-9, atol=1e-3)
+    el = Elements(a_m=1e11, e=0.2, m0=1.0)
+    mu = G * (M_SUN + M_EARTH)
+    r_rel, v_rel = elements_to_state(el, mu, 0.0)
+    sys.add(Body("planet", BODY, mass_kg=M_EARTH, pos0=r_rel, vel0=v_rel))
+    st = sys.initial_states()
+    assert np.allclose(st["planet"][0], r_rel, rtol=1e-12)
+    assert np.allclose(st["planet"][1], v_rel, rtol=1e-12)
 
 
 def test_orbit_period_matches_kepler_third_law():
-    sys = System("t")
-    sys.add(Body("s", STAR, mass_kg=M_SUN))
-    sys.add(Body("p", PLANET, parent="s", elements=Elements(a_m=2.5e11), mass_kg=M_EARTH))
-    el = sys.bodies["p"].elements
+    el = Elements(a_m=2.5e11)
     T = 2 * np.pi * np.sqrt(el.a_m**3 / gm(M_SUN))
     r0, _ = elements_to_state(el, gm(M_SUN), 0.0)
     r1, _ = elements_to_state(el, gm(M_SUN), T)

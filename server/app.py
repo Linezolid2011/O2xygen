@@ -1,8 +1,8 @@
 """o2xygen WebUI backend — FastAPI over the o2xygen physics engine.
 
-Serves the static frontend (web/) plus a JSON API for everything the
-right-hand panel needs: irradiation, structure estimates, temperature
-tables, MIST star estimation, and the one-click solve pipeline.
+Worlds are files (ADR-0016): [worldname].oxygen in WORLDS_DIR. Each world
+is a flat N-body system with Cartesian initial conditions; time is seconds
+since the world's time origin (displayed as yyyy-mm-dd From origin).
 """
 import logging
 import sys
@@ -18,72 +18,23 @@ from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "server"))
 
-from o2xygen.constants import (AU, L_SUN, M_EARTH, M_SUN, R_EARTH_MEAN,
-                                 R_SUN, gm)
-from o2xygen.kepler import Elements
-from o2xygen.system import System, Body, STAR, PLANET, MOON
+from o2xygen.constants import AU, L_SUN, M_EARTH, M_SUN, R_EARTH_MEAN, R_SUN, gm, G
+from o2xygen.kepler import Elements, elements_to_state
+from o2xygen.system import System, Body, STAR, BODY
 from o2xygen.temperature import equilibrium_temperature
 from o2xygen import mass_radius, structure as struct_mod
+from o2xygen import world as world_mod
 
 WEB_DIR = ROOT / "web"
 DOCS_DIR = ROOT / "docs"
-EPOCH_UTC = "2026-11-18T19:00:25Z"          # his "初始时刻", from screenshots
+WORLDS_DIR = Path(r"D:\test3\data\worlds")
 
-# Single source of truth for the version: docs/version.txt
 VERSION = (DOCS_DIR / "version.txt").read_text(encoding="utf-8").strip()
 
 log = logging.getLogger("o2xygen")
 app = FastAPI(title="O2xygen", version=VERSION)
-
-
-# ---------------------------------------------------------------- preset ---
-def build_preset() -> System:
-    """The '白玫瑰' workspace, rebuilt from screenshot fingerprints."""
-    sys = System("白玫瑰")
-    # his solved star (see tests/test_stars.py): 1.29 Msun, [Fe/H]~0.10, 1.26 Gyr
-    sys.add(Body("Αστραία", STAR, mass_kg=1.29 * M_SUN, radius_m=926278.85 * 1000,
-                 luminosity_w=2.8055 * L_SUN,
-                 extra={"teff_k": 6474.11, "mini_msun": 1.29, "feh": 0.10,
-                        "age0_gyr": 1.26}))
-    # Vesper: cool dwarf companion (wide binary)
-    sys.add(Body("Vesper", STAR, parent="Αστραία",
-                 elements=Elements(a_m=60 * AU, e=0.30, inc=np.radians(12),
-                                   raan=0.4, argp=1.2, m0=3.5),
-                 mass_kg=0.85 * M_SUN, radius_m=0.83 * R_SUN,
-                 luminosity_w=0.45 * L_SUN,
-                 extra={"teff_k": 5000.0, "mini_msun": 0.85, "feh": 0.0,
-                        "age0_gyr": 1.26}))
-    # gas giant with rings (screenshot: Saturn-like)
-    sys.add(Body("Νεφέλη", PLANET, parent="Αστραία",
-                 elements=Elements(a_m=1.6 * AU, e=0.08, inc=np.radians(1.2),
-                                   raan=0.1, argp=0.5, m0=0.0),
-                 mass_kg=20 * M_EARTH, radius_m=4.0 * R_EARTH_MEAN,
-                 albedo=0.34, rotation_period_s=9.9 * 3600,
-                 extra={"kind_label": "行星", "ring": True, "cmf": 0.10,
-                        "composition_preset": "巨行星"}))
-    # its moon (his selected body in screenshot 1)
-    sys.add(Body("Αύρα", MOON, parent="Νεφέλη",
-                 elements=Elements(a_m=0.01 * AU, e=0.15, inc=np.radians(24.0),
-                                   raan=0.9, argp=2.1, m0=1.0),
-                 mass_kg=7.3e22, radius_m=0.35 * R_EARTH_MEAN,
-                 albedo=0.09, rotation_period_s=24 * 3600,
-                 extra={"kind_label": "卫星"}))
-    # his terrestrial showcase planet, full stat sheet from screenshots
-    sys.add(Body("Múspellsheimr", PLANET, parent="Αστραία",
-                 elements=Elements(a_m=7.83 * AU, e=0.1924, inc=np.radians(25.12),
-                                   raan=2.2, argp=4.0, m0=2.4),
-                 mass_kg=3.15 * M_EARTH, radius_m=1.35032 * R_EARTH_MEAN,
-                 albedo=0.20, rotation_period_s=17.1 * 3600,
-                 extra={"kind_label": "行星", "ring": True, "cmf": 0.38,
-                        "composition_preset": "硅酸盐 + 铁核",
-                        "atm": {"gases": [("二氧化碳 CO₂", 91.3), ("氮气 N₂", 8.7)],
-                                "tau0": 0.32, "p0_bar": 0.32, "n": 2.0, "S": 0.2,
-                                "nabla": 0.0}}))
-    return sys
-
-
-SYSTEM = build_preset()
 
 
 # ------------------------------------------------------------- MIST grid -----
@@ -125,24 +76,49 @@ def _grid_getter():
 
 
 # ------------------------------------------------------------- workspace -----
-sys.path.insert(0, str(ROOT / "server"))
 from workspace import Workspace          # noqa: E402
 
+
+def _worlds_dir() -> Path:
+    WORLDS_DIR.mkdir(parents=True, exist_ok=True)
+    return WORLDS_DIR
+
+
+def _bootstrap_worlds():
+    """First run: materialise the built-in 白玫瑰 world as a real file."""
+    if not list(_worlds_dir().glob("*.oxygen")):
+        from preset import build_preset
+        world_mod.save_world(build_preset(), _worlds_dir() / "白玫瑰")
+
+
+def _load_system(name: str) -> System:
+    path = _worlds_dir() / name
+    if not path.with_suffix(".oxygen").exists():
+        raise HTTPException(404, f"no world '{name}'")
+    return world_mod.load_world(path)
+
+
+_bootstrap_worlds()
+SYSTEM = _load_system("白玫瑰")
 WS = Workspace(SYSTEM, grid_getter=_grid_getter)
+CURRENT_WORLD = "白玫瑰"
+
+
+def _rebuild(system: System, name: str) -> None:
+    global SYSTEM, WS, CURRENT_WORLD
+    SYSTEM = system
+    WS = Workspace(system, grid_getter=_grid_getter)
+    CURRENT_WORLD = name
 
 
 def body_json(b: Body) -> dict:
     return {
-        "name": b.name, "kind": b.kind, "parent": b.parent,
+        "name": b.name, "kind": b.kind,
+        "kind_label": "恒星" if b.kind == STAR else "天体",
         "mass_kg": b.mass_kg, "radius_m": b.radius_m,
         "albedo": b.albedo,
         "rotation_period_s": b.rotation_period_s,
         "luminosity_w": b.luminosity_w,
-        "elements": None if b.elements is None else {
-            "a_m": b.elements.a_m, "e": b.elements.e,
-            "inc": b.elements.inc, "raan": b.elements.raan,
-            "argp": b.elements.argp, "m0": b.elements.m0,
-        },
         "extra": b.extra,
     }
 
@@ -150,7 +126,9 @@ def body_json(b: Body) -> dict:
 # ------------------------------------------------------------------ API ----
 @app.get("/api/system")
 def get_system():
-    return {"name": SYSTEM.name, "epoch_utc": EPOCH_UTC, "version": VERSION,
+    return {"name": SYSTEM.name, "world": CURRENT_WORLD,
+            "origin": SYSTEM.origin,
+            "version": VERSION,
             "engine": {"integrator": WS.sim.integrator, "dt_s": WS.sim.dt_s},
             "bodies": [body_json(b) for b in SYSTEM.bodies.values()]}
 
@@ -158,7 +136,7 @@ def get_system():
 @app.get("/api/state")
 def get_state(t_days: float = 0.0):
     """Live N-body state at t_days: positions, velocities, masses,
-    luminosities, osculating elements. Advances the workspace integrator."""
+    luminosities, osculating elements (vs origin), trails."""
     return WS.state_at(t_days)
 
 
@@ -284,9 +262,7 @@ def star_estimate(req: StarReq):
 
 @app.get("/api/star/ensure")
 def star_ensure():
-    if _GRID["grid"] is None and not _GRID["loading"] and _GRID["error"] is None:
-        _GRID["loading"] = True
-        threading.Thread(target=_load_grid, daemon=True).start()
+    _grid_getter()
     return star_status()
 
 
@@ -320,31 +296,72 @@ def pipeline(req: PipelineReq):
             "elapsed_s": time.time() - t0}
 
 
+# ------------------------------------------------------------- add body -----
 class AddBodyReq(BaseModel):
     name: str
-    kind: str                              # planet | moon
-    parent: str
-    a_au: float
-    e: float = 0.0
     mass_earth: float = 1.0
+    a_au: float = 1.0
+    e: float = 0.0
+    inc_deg: float = 0.0
+    around: str | None = None              # default: world origin
 
 
 @app.post("/api/add_body")
 def add_body(req: AddBodyReq):
-    if req.name in SYSTEM.bodies:
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(400, "请输入名称")
+    if name in SYSTEM.bodies:
         raise HTTPException(400, "名称已存在")
-    if req.parent not in SYSTEM.bodies:
-        raise HTTPException(400, f"环绕天体 '{req.parent}' 不存在")
-    if req.kind not in (PLANET, MOON):
-        raise HTTPException(400, "类型必须是行星或卫星")
-    SYSTEM.add(Body(req.name, req.kind, parent=req.parent,
-                    elements=Elements(a_m=req.a_au * AU, e=req.e),
-                    mass_kg=req.mass_earth * M_EARTH,
-                    albedo=0.1, rotation_period_s=24 * 3600,
-                    extra={"kind_label": "行星" if req.kind == PLANET else "卫星"}))
-    global WS
-    WS = Workspace(SYSTEM, grid_getter=_grid_getter)   # fresh integrator
-    return {"ok": True, "name": req.name}
+    ref_name = req.around or SYSTEM.origin
+    if ref_name not in SYSTEM.bodies:
+        raise HTTPException(400, f"参考天体 '{ref_name}' 不存在")
+    mass = req.mass_earth * M_EARTH
+    with WS.lock:
+        # place relative to the reference body's CURRENT state (mid-flight
+        # placement): the catalog pos0/vel0 become "state at placement time",
+        # which is what the save file stores for this body.
+        states = WS.sim.live_state()
+        r_o, v_o = states[ref_name]
+        mu = G * (WS.sim.sim.particles[WS.sim._index[ref_name]].m + mass)
+        r_rel, v_rel = elements_to_state(
+            Elements(a_m=req.a_au * AU, e=req.e, inc=np.radians(req.inc_deg)),
+            mu, 0.0)
+        pos = r_o + r_rel
+        vel = v_o + v_rel
+        SYSTEM.add(Body(name, BODY, mass_kg=mass, pos0=pos.copy(), vel0=vel.copy(),
+                        radius_m=R_EARTH_MEAN, albedo=0.1,
+                        rotation_period_s=24 * 3600.0,
+                        extra={"placed_at_s": WS.sim.t_s}))
+        WS.sim.sim.add(m=mass, x=pos[0], y=pos[1], z=pos[2],
+                       vx=vel[0], vy=vel[1], vz=vel[2])
+        WS.sim._order.append(name)
+        WS.sim._index[name] = len(WS.sim._order) - 1
+    return {"ok": True, "name": name}
+
+
+# ------------------------------------------------------------- worlds -------
+@app.get("/api/worlds")
+def list_worlds():
+    files = sorted(p.stem for p in _worlds_dir().glob("*.oxygen"))
+    return {"worlds": files, "current": CURRENT_WORLD}
+
+
+class WorldReq(BaseModel):
+    name: str
+
+
+@app.post("/api/world/load")
+def load_world(req: WorldReq):
+    _rebuild(_load_system(req.name), req.name)
+    return {"ok": True, "world": req.name}
+
+
+@app.post("/api/world/save")
+def save_world(req: WorldReq):
+    name = req.name.strip() or CURRENT_WORLD
+    path = world_mod.save_world(SYSTEM, _worlds_dir() / name)
+    return {"ok": True, "world": path.stem}
 
 
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

@@ -8,8 +8,8 @@ import pytest
 
 from o2xygen.constants import (G, AU, DAY, L_SUN, S_EARTH,
                                  M_EARTH, R_EARTH_MEAN, R_EARTH_EQ, gm)
-from o2xygen.system import System, Body, STAR, MOON
-from o2xygen.kepler import Elements
+from o2xygen.system import System, Body, STAR, BODY, illumination_from_states
+from o2xygen.kepler import Elements, elements_to_state
 from o2xygen.temperature import (equilibrium_temperature, infer_flux_to_t4_factor,
                                    temperature_series)
 
@@ -22,27 +22,28 @@ def test_one_solar_luminosity_at_one_au_gives_s_earth():
 
 
 def test_aura_flux_split_and_total():
-    """Screenshot: Αύρα (moon) panel — Αστραία 3.43977, Vesper 858.020252,
-    total 861.460022 W/m². We rebuild a synthetic two-star system whose
-    geometry yields exactly his displayed total, to lock the flux formula."""
-    sys = System("白玫瑰-synth")
-    # Vesper: pick distance so flux matches; Αστραία contributes the small term.
+    """Screenshot: Αύρα panel — Αστραία 3.43977, Vesper 858.020252,
+    total 861.460022 W/m². Flat world (ADR-0016): a probe body sits at the
+    two stars' distances; illumination_from_states locks the flux formula."""
     d_vesper = np.sqrt(L_SUN / (4 * np.pi * 858.020252))
     d_astraia = np.sqrt(0.02 * L_SUN / (4 * np.pi * 3.43977))
-    sys.add(Body("Αστραία", STAR, luminosity_w=0.02 * L_SUN))
-    sys.add(Body("Vesper", STAR))
-    sys.bodies["Vesper"].luminosity_w = L_SUN
-    # place a test body at the right distances is geometrically overkill;
-    # instead call the flux law directly through illumination on a positioned body
-    sys.add(Body("probe", MOON, parent="Αστραία",
-                 elements=Elements(a_m=d_astraia, m0=0.0)))
-    states = sys.state_at(0.0)
+    sys = System("synth", origin="Αστραία")
+    sys.add(Body("Αστραία", STAR, mass_kg=M_EARTH, luminosity_w=0.02 * L_SUN))
+    sys.add(Body("Vesper", STAR, mass_kg=M_EARTH, luminosity_w=L_SUN,
+                 pos0=np.array([d_astraia + d_vesper, 0, 0]),   # d from PROBE = d_vesper
+                 vel0=np.zeros(3)))
+    sys.add(Body("probe", BODY, mass_kg=0.0,
+                 pos0=np.array([d_astraia, 0, 0]), vel0=np.zeros(3)))
+    states = sys.initial_states()
+    ill = illumination_from_states(sys, states, "probe")
     # direct law check (both stars at their distances):
     fa = 0.02 * L_SUN / (4 * np.pi * d_astraia**2)
     fv = L_SUN / (4 * np.pi * d_vesper**2)
     assert fa == pytest.approx(3.43977, abs=1e-4)
     assert fv == pytest.approx(858.020252, abs=1e-4)
-    assert fa + fv == pytest.approx(861.460022, abs=1e-4)
+    assert ill["Αστραία"] == pytest.approx(fa, rel=1e-9)
+    assert ill["Vesper"] == pytest.approx(fv, rel=1e-9)
+    assert ill["total"] == pytest.approx(861.460022, abs=1e-4)
 
 
 # --- Vector B: temperature <-> flux ------------------------------------------

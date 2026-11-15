@@ -2,7 +2,7 @@
 import { api } from "./api.js";
 import { tempChart } from "./charts.js";
 import { teffColor } from "./scene3d.js";
-import { periodDays, AU, DAY } from "./kepler.js";
+import { AU, DAY } from "./kepler.js";
 
 const $ = (sel) => document.querySelector(sel);
 const fmt = (x, digits = 4) =>
@@ -33,9 +33,9 @@ export async function showBody(name) {
   const b = ctx.system.bodies.find((x) => x.name === name);
   if (!b) return;
   $("#body-name").textContent = b.name;
-  $("#body-kind").textContent = b.kind === "star" ? "恒星" : b.kind === "planet" ? "行星" : "卫星";
+  $("#body-kind").textContent = b.kind === "star" ? "恒星" : "天体";
   $("#body-swatch").style.background = b.kind === "star"
-    ? `#${teffColor(b.extra?.teff_k ?? 5772).getHexString()}` : b.kind === "planet" ? "#7aa2e8" : "#a8c8f0";
+    ? `#${teffColor(b.extra?.teff_k ?? 5772).getHexString()}` : "#7aa2e8";
 
   // prefetch osculating data so renderParams can prefer live elements
   try { lastBodyData = await api.body(name, ctx.getTimeDays()); }
@@ -51,25 +51,26 @@ export async function showBody(name) {
 /* ============================== 基础参数 ============================== */
 async function renderParams(b) {
   const el = $("#tab-params");
-  const parent = b.parent ? ctx.system.bodies.find((x) => x.name === b.parent) : null;
-  // prefer live osculating elements from the N-body state (ADR-0015)
+  const isOrigin = ctx.system.origin === b.name;
+  // osculating elements vs the world origin (ADR-0016) - there is no
+  // parent anymore, and no static fallback: state is the only truth
   const osc = lastBodyData?.osculating ?? null;
-  const T = (lastBodyData && lastBodyData.period_days) ??
-            (parent ? periodDays(b, parent.mass_kg) : null);
-  const el2 = osc
-    ? { a_m: osc.a_m, e: osc.e, inc: osc.inc }
-    : b.elements;
-  const kindLabel = b.kind === "star" ? "恒星" : b.kind === "planet" ? "行星" : "卫星";
+  const T = (lastBodyData && lastBodyData.period_days) ?? null;
+  const el2 = osc ? { a_m: osc.a_m, e: osc.e, inc: osc.inc } : null;
+  const kindLabel = b.kind === "star" ? "恒星" : "天体";
+  const originName = ctx.system.origin ?? "";
 
   el.innerHTML = `
     <div class="sec">
-      <div class="sec-title">轨道</div>
-      ${el2 ? `
+      <div class="sec-title">轨道${isOrigin ? "" : ` (相对 ${originName} · 瞬时)`}</div>
+      ${isOrigin
+        ? `<div class="note">原点天体 · 世界参考点</div>`
+        : el2 ? `
       <div class="kv"><span class="k">轨道半长轴</span><span class="v">${fmt(el2.a_m / AU, 3)} AU</span></div>
       <div class="kv"><span class="k">偏心率</span><span class="v">${fmt(el2.e, 4)}</span></div>
       <div class="kv"><span class="k">倾角</span><span class="v">${fmt((el2.inc * 180) / Math.PI, 2)}°</span></div>
       <div class="kv"><span class="k">周期</span><span class="v accent">${T > 1200 ? fmt(T / 365.25, 2) + " 年" : fmt(T, 1) + " 天"}</span></div>`
-      : `<div class="note">中心天体 · 系统参考点</div>`}
+        : `<div class="note">等待快照…</div>`}
     </div>
     <div class="sec">
       <div class="sec-title">物理</div>
@@ -423,15 +424,15 @@ export function onTimeChanged() {
 /* ============================== 介绍 ============================== */
 function renderIntro(b) {
   const el = $("#tab-intro");
-  const kindLabel = b.kind === "star" ? "恒星" : b.kind === "planet" ? "行星" : "卫星";
-  const parent = b.parent ? ctx.system.bodies.find((x) => x.name === b.parent) : null;
-  const T = (lastBodyData && lastBodyData.period_days) ??
-            (parent ? periodDays(b, parent.mass_kg) : null);
+  const kindLabel = b.kind === "star" ? "恒星" : "天体";
+  const isOrigin = ctx.system.origin === b.name;
+  const osc = lastBodyData?.osculating ?? null;
+  const T = (lastBodyData && lastBodyData.period_days) ?? null;
   el.innerHTML = `
     <div class="intro-md">
       <h4>${b.name}</h4>
-      <p>${kindLabel}${parent ? `,环绕 ${parent.name} 运行` : ",位于系统中心"}。</p>
-      ${T ? `<p>轨道半长轴约 ${fmt(b.elements.a_m / AU, 2)} AU,周期约 ${fmt(T / 365.25, 2)} 年。</p>` : ""}
+      <p>${kindLabel}${isOrigin ? ",世界原点天体" : `,瞬时轨道相对 ${ctx.system.origin ?? "原点"}`}。</p>
+      ${osc && T ? `<p>瞬时半长轴约 ${fmt(osc.a_m / AU, 2)} AU,周期约 ${fmt(T / 365.25, 2)} 年(N-body 实时状态,非固定轨道)。</p>` : ""}
       <p>质量约 ${b.kind === "star" ? fmt(b.mass_kg / 1.98847e30, 2) + " M☉" : fmt(b.mass_kg / 5.9722e24, 2) + " M⊕"},
       半径约 ${b.kind === "star" ? fmt(b.radius_m / 6.957e8, 3) + " R☉" : fmt(b.radius_m / 6.371e6, 4) + " R⊕"}。</p>
       ${b.extra?.teff_k ? `<p>有效温度约 ${fmt(b.extra.teff_k, 0)} K。</p>` : ""}

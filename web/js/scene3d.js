@@ -32,8 +32,7 @@ function styleRadius(body) {
   // Aesthetic baseline (world units), BEFORE hierarchy caps are applied.
   const R_SUN_M = 6.957e8, R_E_M = 6.371e6;
   if (body.kind === "star") return AU * (0.024 + 0.006 * body.radius_m / R_SUN_M);
-  if (body.kind === "planet") return AU * (0.012 + 0.0018 * Math.sqrt(body.radius_m / R_E_M));
-  return AU * (0.0075 + 0.0009 * Math.sqrt(body.radius_m / R_E_M));
+  return AU * (0.012 + 0.0018 * Math.sqrt(body.radius_m / R_E_M));
 }
 
 export class OrbitScene {
@@ -89,31 +88,12 @@ export class OrbitScene {
   buildBodies() {
     this.bodyMeshes = {};
     this.bodyGroups = {};
-    // Hierarchy-aware display radii. Hard constraint: every child's orbit
-    // (at periapsis) must clear its parent's ball — otherwise moons orbit
-    // INSIDE an oversized display sphere. Soft constraint: a body never
-    // exceeds 55% of its parent's display radius (keeps proportions sane).
-    const orbitCaps = {};
-    for (const b of this.system.bodies) {
-      if (!b.parent || !b.elements) continue;
-      const peri = b.elements.a_m * (1 - b.elements.e);
-      orbitCaps[b.parent] = Math.min(orbitCaps[b.parent] ?? Infinity, peri * 0.45);
-    }
-    const byName = {};
-    for (const b of this.system.bodies) byName[b.name] = b;
-    const resolved = {};
-    const resolveR = (name) => {
-      if (resolved[name] !== undefined) return resolved[name];
-      const b = byName[name];
-      let R = Math.min(styleRadius(b), orbitCaps[name] ?? Infinity, AU * 0.3);
-      if (b.parent && byName[b.parent]) {
-        R = Math.min(R, resolveR(b.parent) * 0.55);
-      }
-      resolved[name] = R;
-      return R;
-    };
+    // Flat world (ADR-0016): no hierarchy-aware display caps (they needed
+    // parent elements). Display radius = type baseline, hard-capped.
     this.displayRadii = {};
-    for (const b of this.system.bodies) this.displayRadii[b.name] = resolveR(b.name);
+    for (const b of this.system.bodies) {
+      this.displayRadii[b.name] = Math.min(styleRadius(b), AU * 0.3);
+    }
 
     for (const b of this.system.bodies) {
       const group = new THREE.Group();
@@ -131,10 +111,9 @@ export class OrbitScene {
         }));
         glow.scale.setScalar(R * 2.6);
         group.add(glow);
-        if (!b.parent) this.starLight.position.set(0, 0, 0);
       } else {
-        const baseHue = b.kind === "planet" ? 0.58 : 0.55;
-        const color = new THREE.Color().setHSL(baseHue, 0.35, b.kind === "planet" ? 0.62 : 0.7);
+        const baseHue = 0.58;                 // flat world: one non-star kind
+        const color = new THREE.Color().setHSL(baseHue, 0.35, 0.62);
         mesh = new THREE.Mesh(
           new THREE.SphereGeometry(R, 36, 24),
           new THREE.MeshStandardMaterial({
@@ -147,8 +126,7 @@ export class OrbitScene {
       group.add(mesh);
 
       if (b.extra?.ring) {
-        let outer = R * 2.3;
-        if (orbitCaps[b.name] !== undefined) outer = Math.min(outer, orbitCaps[b.name] * 1.7);
+        const outer = Math.min(R * 2.3, AU * 0.5);
         const inner = outer * 0.63;
         const ringGeo = new THREE.RingGeometry(inner, outer, 96);
         // fix UVs so the ring shades flat
@@ -175,7 +153,7 @@ export class OrbitScene {
      *  Head (near the body) is bright, tail fades out - like smoke. */
     this.trailByName = {};
     for (const b of this.system.bodies) {
-      if (!b.parent || !b.elements) continue;
+      if (b.name === this.system.origin) continue;      // origin defines the frame
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(3), 3));
       geo.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(3), 3));
@@ -188,7 +166,6 @@ export class OrbitScene {
   }
 
   _trailColor(b) {
-    if (b.kind === "moon") return new THREE.Color(0x7a90c0);
     if (b.kind === "star") return new THREE.Color(0xd8b090);
     return new THREE.Color(0xaab3c8);
   }
@@ -218,7 +195,7 @@ export class OrbitScene {
       if (mesh?.material?.color) mesh.material.color.copy(c);
       const glow = g?.children.find((ch) => ch.isSprite);
       if (glow) glow.material.color.copy(c);
-      if (!b.parent) this.starLight.color.copy(c);
+      if (b.name === this.system.origin) this.starLight.color.copy(c);
     }
   }
 
@@ -274,7 +251,6 @@ export class OrbitScene {
   buildLabels() {
     this.labelDivs = {};
     for (const b of this.system.bodies) {
-      if (!b.elements && b.kind !== "star") continue;
       const div = document.createElement("div");
       div.className = "body-label";
       div.textContent = b.name;
@@ -371,22 +347,26 @@ export class OrbitScene {
 
   update(tDays) {
     const tS = tDays * DAY;
+    // ADR-0016: the render frame is ORIGIN-RELATIVE - everything is drawn at
+    // (absolute position - origin body's position).
+    const originName = this.system.origin;
+    const op = originName ? this._posAt(originName, tS) : { x: 0, y: 0, z: 0 };
     for (const b of this.system.bodies) {
       const g = this.bodyGroups[b.name];
       if (!g) continue;
       const p = this._posAt(b.name, tS);
-      g.position.set(p.x, p.y, p.z);
-      // slow spin for planets
+      g.position.set(p.x - op.x, p.y - op.y, p.z - op.z);
+      // slow spin for non-stars
       if (b.kind !== "star" && b.rotation_period_s) {
         const m = this.bodyMeshes[b.name];
         m.rotation.y = (tS / b.rotation_period_s) * 2 * Math.PI;
       }
     }
-    // star light follows the primary star
-    const primary = this.system.bodies.find((b) => b.kind === "star" && !b.parent);
+    // star light follows the primary star (rendered position)
+    const primary = this.system.bodies.find((b) => b.kind === "star");
     if (primary) {
       const p = this._posAt(primary.name, tS);
-      this.starLight.position.set(p.x, p.y, p.z);
+      this.starLight.position.set(p.x - op.x, p.y - op.y, p.z - op.z);
     }
   }
 

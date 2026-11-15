@@ -13,7 +13,7 @@ export function buildCatalog(system, onSelect) {
       if (t > 4200) return "#ffc98a";
       return "#ff9a6a";
     }
-    return b.kind === "planet" ? "#7aa2e8" : "#a8c8f0";
+    return "#7aa2e8";                      // flat world: one non-star kind (ADR-0016)
   }
 
   function render() {
@@ -23,13 +23,13 @@ export function buildCatalog(system, onSelect) {
       if (q && !b.name.toLowerCase().includes(q)) continue;
       const li = document.createElement("li");
       li.dataset.name = b.name;
-      const depth = b.parent ? 1 : 0;
+      const isOrigin = system.origin === b.name;
       li.innerHTML = `
-        <span class="child-mark">${depth ? "└" : ""}</span>
+        <span class="child-mark">${isOrigin ? "◎" : ""}</span>
         <span class="dot" style="background:${kindColor(b)}"></span>
         <span class="bname">${b.name}</span>
-        <span class="bkind">${b.kind === "star" ? "恒星" : b.kind === "planet" ? "行星" : "卫星"}</span>`;
-      li.style.paddingLeft = `${10 + depth * 16}px`;
+        <span class="bkind">${b.kind === "star" ? "恒星" : "天体"}</span>`;
+      li.style.paddingLeft = "10px";
       li.addEventListener("click", () => onSelect(b.name));
       ul.appendChild(li);
       items[b.name] = li;

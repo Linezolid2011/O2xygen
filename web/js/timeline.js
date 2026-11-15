@@ -1,7 +1,20 @@
 // Bottom timeline: play/pause, typable speed (天/秒), typable span (年),
-// scrub, dynamic tick labels, UTC clock.
-const EPOCH_MS = Date.parse("2026-11-18T19:00:25Z");
+// scrub, dynamic tick labels, "yyyy-mm-dd From origin" clock (ADR-0016:
+// time = seconds since the world origin; the calendar is a uniform display
+// convention - 365.25 d/yr, 12 equal months).
 const YEAR_D = 365.25;
+
+export function fmtFromOrigin(days) {
+  const MONTH = YEAR_D / 12;
+  const neg = days < 0;
+  const d = Math.abs(days);
+  const y = Math.floor(d / YEAR_D);
+  const rem = d - y * YEAR_D;
+  const mo = Math.min(12, Math.floor(rem / MONTH) + 1);
+  const dy = Math.floor(rem - (mo - 1) * MONTH) + 1;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${neg ? "-" : ""}${y}-${pad(mo)}-${pad(dy)} From origin`;
+}
 
 function fmtTick(d) {
   const trim = (x) => {
@@ -82,8 +95,7 @@ export function initTimeline(callbacks) {
   }
 
   function updateClock() {
-    const ms = EPOCH_MS + state.days * 86400_000;
-    clock.textContent = new Date(ms).toISOString().replace("T", " ").slice(0, 23) + " UTC";
+    clock.textContent = fmtFromOrigin(state.days);
   }
 
   renderTicks();

@@ -1,17 +1,16 @@
-"""Real-time N-body propagation (ADR-0015).
+"""Real-time N-body propagation (ADR-0015), over flat worlds (ADR-0016).
 
-Replaces analytic Kepler as the propagation truth: the system state is
-integrated live with rebound (WHFast by default; IAS15 for close encounters).
-`kepler.py` is retained for initial-state construction and two-body
-calibration truth.
+The propagation truth: the world state (Cartesian, SI) integrated live with
+rebound. `kepler.py` is retained as a PLACEMENT tool (elements -> state
+vectors at world-build time) and two-body calibration truth.
 
 Key properties:
   * deterministic: fixed timestep, checkpointed; scrubbing backward and
     forward reproduces the same state (time-symmetric queries);
   * stellar evolution coupling: masses updated between steps (adiabatic) so
     long timelines show genuine orbital inflation from wind mass loss;
-  * osculating elements: the UI's a/e/i/period become derived outputs of the
-    live state, no longer independent inputs after t0.
+  * osculating elements: derived outputs of the live state RELATIVE TO THE
+    WORLD'S ORIGIN BODY (no parents exist anymore; see ADR-0016).
 """
 from __future__ import annotations
 
@@ -20,8 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 import rebound
 
-from .constants import G, DAY, gm
-from .kepler import Elements, elements_to_state
+from .constants import G, DAY
 from .system import System
 
 
@@ -72,9 +70,9 @@ def rv_to_elements(r_vec: np.ndarray, v_vec: np.ndarray, mu: float) -> Osculatin
 class NBodySimulation:
     """Integrates a System live. Server-side truth for all state queries.
 
-    integrator: "ias15" (default in the app layer; adaptive, excellent
-    time-reversibility for timeline scrubbing, clean mass changes) or
-    "whfast" (symplectic; kept for long-haul studies, see ADR-0015).
+    integrator: "ias15" (default; adaptive, excellent time-reversibility
+    for timeline scrubbing, clean mass changes) or "whfast" (symplectic,
+    kept for long-haul studies, see ADR-0015).
     """
 
     def __init__(self, system: System, integrator: str = "ias15",
@@ -85,9 +83,9 @@ class NBodySimulation:
         self._order = self._particle_order(system)
         self._index = {name: i for i, name in enumerate(self._order)}
 
-        states = self._initial_states(system)
+        states = system.initial_states()
         if dt_s is None:
-            dt_s = self._default_dt(system)
+            dt_s = self._default_dt(system, states)
         self.dt_s = float(dt_s)
         # checkpoint cadence aligned to the fixed step grid
         steps = max(1, int(round(checkpoint_every_s / self.dt_s)))
@@ -108,47 +106,29 @@ class NBodySimulation:
     # ----------------------------------------------------------- construction
     @staticmethod
     def _particle_order(system: System) -> list[str]:
-        """WHFast needs Jacobi ordering: hierarchy level, then mass desc.
-        Massless bodies end up last within their level automatically."""
-        level = {}
+        """Mass-descending order (stars first). The old hierarchy-based
+        Jacobi ordering is gone with the hierarchy itself (ADR-0016)."""
+        return sorted(system.bodies, key=lambda n: -system.bodies[n].mass_kg)
 
-        def depth(name):
-            if name not in level:
-                b = system.bodies[name]
-                level[name] = 0 if b.parent is None else depth(b.parent) + 1
-            return level[name]
-
-        for name in system.bodies:
-            depth(name)
-        return sorted(system.bodies, key=lambda n: (level[n], -system.bodies[n].mass_kg))
-
-    def _initial_states(self, system: System) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-        """Elements at epoch -> absolute Cartesian state (kepler.py's job)."""
-        out: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        for name in self._order:
-            b = system.bodies[name]
-            if b.parent is None:
-                out[name] = (np.zeros(3), np.zeros(3))
-            else:
-                rp, vp = out[b.parent]
-                # exact two-body relative motion: mu = G * (M + m), so that
-                # osculating elements round-trip at the epoch. (kepler.py's
-                # parent-only mu remains the display/Kepler-layer convention.)
-                mu = G * (system.bodies[b.parent].mass_kg + b.mass_kg)
-                rl, vl = elements_to_state(b.elements, mu, 0.0)
-                out[name] = (rp + rl, vp + vl)
-        return out
-
-    def _default_dt(self, system: System) -> float:
-        periods = []
-        for b in system.bodies.values():
-            if b.parent is not None and b.elements is not None:
-                mu = gm(system.bodies[b.parent].mass_kg)
-                if mu > 0:
-                    periods.append(2.0 * np.pi * np.sqrt(b.elements.a_m**3 / mu))
-        if not periods:
+    def _default_dt(self, system: System,
+                    states: dict) -> float:
+        """Smallest pairwise dynamical timescale / 40, estimated from
+        initial separations: t_dyn ~ sqrt(d^3 / (G (m1+m2)))."""
+        names = list(states)
+        best = None
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                d = np.linalg.norm(states[names[i]][0] - states[names[j]][0])
+                if d <= 0:
+                    continue
+                m = system.bodies[names[i]].mass_kg + system.bodies[names[j]].mass_kg
+                if m <= 0:
+                    continue
+                t = np.sqrt(d**3 / (G * m))
+                best = t if best is None else min(best, t)
+        if best is None or not np.isfinite(best):
             return DAY
-        return min(periods) / 40.0
+        return max(best / 40.0, 1.0)
 
     def _fresh_sim(self) -> rebound.Simulation:
         sim = rebound.Simulation()
@@ -244,11 +224,15 @@ class NBodySimulation:
             except Exception:
                 pass   # field name differs across rebound versions
 
-    def osculating_elements(self, body_name: str) -> OsculatingElements:
-        b = self.system.bodies[body_name]
-        if b.parent is None:
-            raise ValueError("root body has no osculating elements")
-        i, j = self._index[body_name], self._index[b.parent]
+    def osculating_elements(self, body_name: str,
+                            ref: str | None = None) -> OsculatingElements:
+        """Elements of body_name relative to `ref` (default: the world's
+        origin body). With no hierarchy this is a VIEW, not an identity:
+        a moon's elements w.r.t. the star look like a perturbed planet."""
+        ref = ref or self.system.origin
+        if ref is None or ref == body_name:
+            raise ValueError("osculating elements need a distinct reference body")
+        i, j = self._index[body_name], self._index[ref]
         ps = self.sim.particles
         r = np.array(ps[i].xyz) - np.array(ps[j].xyz)
         v = np.array(ps[i].vxyz) - np.array(ps[j].vxyz)

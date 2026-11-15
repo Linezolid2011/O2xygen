@@ -25,4 +25,7 @@ export const api = {
   starEnsure: () => jget("/api/star/ensure"),
   starEstimate: (req) => jpost("/api/star/estimate", req),
   pipeline: (req) => jpost("/api/pipeline", req),
+  worlds: () => jget("/api/worlds"),
+  worldLoad: (name) => jpost("/api/world/load", { name }),
+  worldSave: (name) => jpost("/api/world/save", { name }),
 };

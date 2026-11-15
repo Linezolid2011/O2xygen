@@ -239,6 +239,7 @@ tr.temp-current td { color: var(--accent); font-weight: 600; background: var(--a
   border-radius: 5px; outline: none; }
 .mini-input:focus { border-color: #6f5b41; }
 .unit { font-size: 11px; color: #6a7183; margin-left: -4px; margin-right: 6px; }
+.modal-note { font-size: 11px; color: #6a7183; margin: 4px 2px 0; line-height: 1.5; }
 .tl-track { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .tl-track input[type="range"] { width: 100%; }
 .tl-ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-faint); padding: 0 2px; }

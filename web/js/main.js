@@ -18,6 +18,28 @@ async function boot() {
       `N-BODY · ${system.engine.integrator.toUpperCase()} · dt ${dtD.toFixed(2)}d · O₂xygen v`;
   }
 
+  // ---- world selector (.oxygen archives, ADR-0016) ----
+  const worldSel = $("#world-select");
+  async function refreshWorlds() {
+    const w = await api.worlds();
+    worldSel.innerHTML = w.worlds
+      .map((n) => `<option value="${n}" ${n === w.current ? "selected" : ""}>${n}</option>`)
+      .join("");
+  }
+  worldSel.addEventListener("change", async () => {
+    await api.worldLoad(worldSel.value);
+    location.reload();
+  });
+  $("#btn-world-save").addEventListener("click", async () => {
+    const name = prompt("另存为世界存档(.oxygen):", system.name);
+    if (!name) return;
+    const r = await api.worldSave(name.trim());
+    await refreshWorlds();
+    worldSel.value = r.world;
+    $("#ws-name").textContent = r.world;
+  });
+  await refreshWorlds();
+
   let selected = null;
 
   let scene = null;             // set below; timeline callbacks fire later
@@ -162,8 +184,9 @@ async function boot() {
     const r = await fetch("/api/add_body", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name, kind: $("#add-kind").value, parent: parentSel.value,
+        name, around: parentSel.value,
         a_au: parseFloat($("#add-a").value), e: parseFloat($("#add-e").value),
+        inc_deg: parseFloat($("#add-inc").value),
         mass_earth: parseFloat($("#add-mass").value),
       }),
     });
