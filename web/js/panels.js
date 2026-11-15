@@ -375,7 +375,14 @@ async function renderTemperature(b) {
 
   $("#tp-run").addEventListener("click", computeTemp);
   $("#tp-follow").addEventListener("change", () => chart?.setFollow($("#tp-follow").checked));
-  await computeTemp();
+  try {
+    await computeTemp();
+  } catch (e) {
+    // a far-away sim position can make the leap back to epoch exceed the
+    // integration budget: show the reason, do not kill the app boot
+    const box = $("#tp-chart");
+    if (box) box.innerHTML = `<div class="note err">温度表不可用:${e.message}</div>`;
+  }
 }
 
 async function computeTemp() {

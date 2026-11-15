@@ -1,4 +1,14 @@
 // Thin fetch wrappers around the FastAPI backend.
+async function errDetail(r) {
+  // non-OK bodies may be plain text ("Internal Server Error") - never let
+  // JSON.parse of that kill the app with a confusing SyntaxError
+  try {
+    const d = await r.json();
+    return d.detail?.toString() || r.statusText;
+  } catch {
+    return `${r.status} ${r.statusText}`;
+  }
+}
 async function jpost(url, payload) {
   const r = await fetch(url, {
     method: "POST",
@@ -6,12 +16,12 @@ async function jpost(url, payload) {
     body: JSON.stringify(payload),
   });
   if (r.status === 503) return { ...(await r.json()), _unavailable: true };
-  if (!r.ok) throw new Error((await r.json()).detail?.toString() || r.statusText);
+  if (!r.ok) throw new Error(await errDetail(r));
   return r.json();
 }
 async function jget(url) {
   const r = await fetch(url);
-  if (!r.ok) throw new Error(r.statusText);
+  if (!r.ok) throw new Error(await errDetail(r));
   return r.json();
 }
 

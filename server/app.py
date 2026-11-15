@@ -223,7 +223,10 @@ def temperature(name: str, req: TempReq):
         raise HTTPException(404, f"no body '{name}'")
 
     def sample(d):
-        ill = WS.flux_at(name, d)["illumination"]
+        try:
+            ill = WS.flux_at(name, d)["illumination"]
+        except IntegrateBudgetExceeded as e:
+            raise HTTPException(413, str(e))
         return {"d": d, "flux": ill["total"],
                 "T": equilibrium_temperature(ill["total"], albedo=req.albedo,
                                              regime=req.regime)}
