@@ -47,7 +47,8 @@
         <input type="text" id="catalog-filter" placeholder="搜索天体…  ">
       </div>
       <ul id="catalog"></ul>
-      <button class="btn ghost add-body" id="btn-add-body">＋ 添加天体</button>
+      <!-- TEMP-DISABLED(2026-11-15): 添加天体挡路,后续加回。恢复:取消下面两行的注释 + main.js 对应 wiring -->
+      <!-- <button class="btn ghost add-body" id="btn-add-body">＋ 添加天体</button> -->
       <div class="sidebar-foot">● 本地工作空间</div>
     </aside>
 
@@ -76,15 +77,16 @@
       </div>
       <nav id="panel-tabs">
         <button class="ptab active" data-tab="params">基础参数</button>
-        <button class="ptab" data-tab="structure">结构</button>
-        <button class="ptab" data-tab="atmosphere">大气</button>
+        <!-- TEMP-DISABLED(2026-11-15): 结构/大气挡路,后续加回(panels.js 中的调用同步注释) -->
+        <!-- <button class="ptab" data-tab="structure">结构</button> -->
+        <!-- <button class="ptab" data-tab="atmosphere">大气</button> -->
         <button class="ptab" data-tab="temperature">温度表</button>
         <button class="ptab" data-tab="intro">介绍</button>
       </nav>
       <div id="panel-body">
         <section class="tab-page active" id="tab-params"></section>
-        <section class="tab-page" id="tab-structure"></section>
-        <section class="tab-page" id="tab-atmosphere"></section>
+        <section class="tab-page" id="tab-structure" hidden></section>
+        <section class="tab-page" id="tab-atmosphere" hidden></section>
         <section class="tab-page" id="tab-temperature"></section>
         <section class="tab-page" id="tab-intro"></section>
       </div>

@@ -184,35 +184,36 @@ async function boot() {
   }
 
   // ---------------- add-body modal ----------------
-  const addModal = $("#add-modal");
-  const parentSel = $("#add-parent");
-  function refreshParents() {
-    parentSel.innerHTML = system.bodies
-      .map((b) => `<option value="${b.name}">${b.name}</option>`).join("");
-  }
-  $("#btn-add-body").addEventListener("click", () => { refreshParents(); addModal.hidden = false; });
-  $("#add-close").addEventListener("click", () => { addModal.hidden = true; });
-  $("#add-cancel").addEventListener("click", () => { addModal.hidden = true; });
-  $("#add-confirm").addEventListener("click", async () => {
-    const name = $("#add-name").value.trim();
-    if (!name) { $("#add-error").textContent = "请输入名称"; return; }
-    if (system.bodies.some((b) => b.name === name)) { $("#add-error").textContent = "名称已存在"; return; }
-    const a = parseFloat($("#add-a").value), e = parseFloat($("#add-e").value),
-          inc = parseFloat($("#add-inc").value), mass = parseFloat($("#add-mass").value);
-    if (![a, e, inc, mass].every(isFinite)) {
-      $("#add-error").textContent = "请输入有效的轨道根数与质量数值";
-      return;
-    }
-    const r = await fetch("/api/add_body", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name, around: parentSel.value,
-        a_au: a, e, inc_deg: inc, mass_earth: mass,
-      }),
-    });
-    if (!r.ok) { $("#add-error").textContent = await errDetail(r); return; }
-    location.reload();
-  });
+  // TEMP-DISABLED(2026-11-15): 添加天体挡路,后续加回。连同 index.html 的按钮与本块一起取消注释。
+  // const addModal = $("#add-modal");
+  // const parentSel = $("#add-parent");
+  // function refreshParents() {
+  //   parentSel.innerHTML = system.bodies
+  //     .map((b) => `<option value="${b.name}">${b.name}</option>`).join("");
+  // }
+  // $("#btn-add-body").addEventListener("click", () => { refreshParents(); addModal.hidden = false; });
+  // $("#add-close").addEventListener("click", () => { addModal.hidden = true; });
+  // $("#add-cancel").addEventListener("click", () => { addModal.hidden = true; });
+  // $("#add-confirm").addEventListener("click", async () => {
+  //   const name = $("#add-name").value.trim();
+  //   if (!name) { $("#add-error").textContent = "请输入名称"; return; }
+  //   if (system.bodies.some((b) => b.name === name)) { $("#add-error").textContent = "名称已存在"; return; }
+  //   const a = parseFloat($("#add-a").value), e = parseFloat($("#add-e").value),
+  //         inc = parseFloat($("#add-inc").value), mass = parseFloat($("#add-mass").value);
+  //   if (![a, e, inc, mass].every(isFinite)) {
+  //     $("#add-error").textContent = "请输入有效的轨道根数与质量数值";
+  //     return;
+  //   }
+  //   const r = await fetch("/api/add_body", {
+  //     method: "POST", headers: { "Content-Type": "application/json" },
+  //     body: JSON.stringify({
+  //       name, around: parentSel.value,
+  //       a_au: a, e, inc_deg: inc, mass_earth: mass,
+  //     }),
+  //   });
+  //   if (!r.ok) { $("#add-error").textContent = await errDetail(r); return; }
+  //   location.reload();
+  // });
 
   // initial selection: the moon he had selected in the screenshots
   await select(system.bodies.some((b) => b.name === "Αύρα") ? "Αύρα" : system.bodies[0].name);

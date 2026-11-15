@@ -47,8 +47,9 @@ export async function showBody(name) {
   catch { lastBodyData = null; }
   if (current !== body) return;   // stale: a newer showBody won
   renderParams(b);
-  renderStructure(b);
-  renderAtmosphere(b);
+  // TEMP-DISABLED(2026-11-15): 结构/大气挡路,后续加回(index.html 的页签已同步隐藏)
+  // renderStructure(b);
+  // renderAtmosphere(b);
   await renderTemperature(b);
   if (current !== body) return;
   await refreshIrradiation(true); // fills the 辐照 DOM (element now exists)
