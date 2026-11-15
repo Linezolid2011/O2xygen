@@ -7,7 +7,7 @@ O₂xygen 作为独立产品演进。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.0] - 2026-11-15
 
 ### 破坏性变更(ADR-0016):世界即存档
 
@@ -128,5 +128,6 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   长跨度(>1000 年)下层级三体呈弱混沌,回扫与首次前进的瞬时根数
   可能差百分之几(物理真实,非缺陷)。
 
+[0.1.0]: https://github.com/Linezolid2011/O2xygen/tree/0.1.0
 [0.0.1]: https://github.com/Linezolid2011/O2xygen/releases/tag/v0.0.1
 [0.0.0]: https://github.com/Linezolid2011/O2xygen/tree/0.0.0
