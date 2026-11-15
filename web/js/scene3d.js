@@ -29,10 +29,9 @@ export function teffColor(teff) {
 }
 
 function styleRadius(body) {
-  // Aesthetic baseline (world units), BEFORE hierarchy caps are applied.
-  const R_SUN_M = 6.957e8, R_E_M = 6.371e6;
-  if (body.kind === "star") return AU * (0.024 + 0.006 * body.radius_m / R_SUN_M);
-  return AU * (0.012 + 0.0018 * Math.sqrt(body.radius_m / R_E_M));
+  // ADR-0017: DRAWN TO SCALE. The rendered sphere IS the physical radius.
+  // Planets shrink to dots at system zoom - that is the honest view.
+  return Math.max(body.radius_m, 1e6);     // floor only against degenerate 0
 }
 
 export class OrbitScene {
@@ -74,7 +73,7 @@ export class OrbitScene {
     // picking
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
-    this.meshes = Object.values(this.bodyMeshes);
+    this.meshes = Object.values(this.pickProxies);   // raycast vs pick proxies
     this.bindPicking(canvas);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -88,11 +87,11 @@ export class OrbitScene {
   buildBodies() {
     this.bodyMeshes = {};
     this.bodyGroups = {};
-    // Flat world (ADR-0016): no hierarchy-aware display caps (they needed
-    // parent elements). Display radius = type baseline, hard-capped.
+    this.pickProxies = {};
+    // ADR-0017: display radius = physical radius, no caps, no baselines.
     this.displayRadii = {};
     for (const b of this.system.bodies) {
-      this.displayRadii[b.name] = Math.min(styleRadius(b), AU * 0.3);
+      this.displayRadii[b.name] = styleRadius(b);
     }
 
     for (const b of this.system.bodies) {
@@ -109,7 +108,9 @@ export class OrbitScene {
           map: glowTexture(), color, transparent: true, opacity: 0.55,
           blending: THREE.AdditiveBlending, depthWrite: false,
         }));
-        glow.scale.setScalar(R * 2.6);
+        // glow is a light halo, not a size claim: small floor so stars stay
+        // findable at system zoom, but never larger than the star itself
+        glow.scale.setScalar(Math.max(R * 2.6, AU * 0.0006));
         group.add(glow);
       } else {
         const baseHue = 0.58;                 // flat world: one non-star kind
@@ -124,6 +125,16 @@ export class OrbitScene {
       }
       mesh.userData.bodyName = b.name;
       group.add(mesh);
+
+      // invisible pick proxy: true-scale spheres are too small to click at
+      // system zoom; the proxy is a USABILITY aid, not a size claim
+      const proxy = new THREE.Mesh(
+        new THREE.SphereGeometry(Math.max(R * 1.1, AU * 0.0015), 8, 6),
+        new THREE.MeshBasicMaterial({ visible: false })
+      );
+      proxy.userData.bodyName = b.name;
+      group.add(proxy);
+      this.pickProxies[b.name] = proxy;
 
       if (b.extra?.ring) {
         const outer = Math.min(R * 2.3, AU * 0.5);
@@ -307,7 +318,7 @@ export class OrbitScene {
     const target = g.position.clone();
     const dir = this.camera.position.clone().sub(this.controls.target).normalize();
     let dist = this.camera.position.distanceTo(this.controls.target);
-    dist = Math.min(Math.max(dist, AU * 0.02), AU * 400);
+    dist = Math.min(Math.max(dist, AU * 0.0002), AU * 400);  // true-scale: allow close fly-ins
     const toPos = target.clone().add(dir.multiplyScalar(dist));
     this._flyTo(target, toPos, 600);
   }
@@ -347,6 +358,14 @@ export class OrbitScene {
 
   update(tDays) {
     const tS = tDays * DAY;
+    // adaptive near plane: true-scale bodies are tiny, the camera must be
+    // able to fly in close (fixed AU*0.001 near would clip a 4 R_E planet)
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    const near = Math.min(Math.max(dist * 0.02, 1e4), AU * 0.001);
+    if (Math.abs(near - this.camera.near) / this.camera.near > 0.2) {
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+    }
     // ADR-0016: the render frame is ORIGIN-RELATIVE - everything is drawn at
     // (absolute position - origin body's position).
     const originName = this.system.origin;

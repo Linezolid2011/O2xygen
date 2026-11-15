@@ -57,7 +57,11 @@ def build_preset() -> System:
            rotation_h=9.9,
            extra={"ring": True, "cmf": 0.10, "composition_preset": "巨行星"})
 
-    # its moon — now just a small body on a close orbit around the giant
+    # its moon — now just a small body on a close orbit around the giant.
+    # a = 0.01 AU = 0.27 r_Hill(Νεφέλη) — comfortably stable (Domingos+2006
+    # prograde limit ≈ 0.49 r_H ≈ 0.018 AU) and 45x the sum of the two
+    # PHYSICAL radii. The "orbit inside the planet" visual was a DISPLAY
+    # baseline bug (fixed in scene3d styleRadius, 2026-11-15).
     _place(sys, "Αύρα", BODY, "Νεφέλη",
            Elements(a_m=0.01 * AU, e=0.15, inc=np.radians(24.0), raan=0.9,
                     argp=2.1, m0=1.0),
