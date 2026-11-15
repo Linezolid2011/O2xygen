@@ -64,16 +64,48 @@ async function boot() {
   });
   window.__scene = scene;      // debug/test hook
 
-  // ---- live N-body snapshots (ADR-0015) at the CURRENT sim time. The
-  // client propagates between polls; trails refresh per snapshot.
+  // ---- live N-body snapshots (ADR-0015) at the CURRENT sim time. A
+  // render clock advances with wall time at the evolution speed between
+  // snapshots (server snapshots resync it), so slow evolution is SMOOTH
+  // instead of jumping once per poll - the "0.5 s per frame" stutter.
+  let renderDays = 0, evoSpeedDps = 0;
+  let lastSnapDays = 0, lastSnapWall = 0;
+  let lastEvolveWatchdog = 0;
   async function pollState() {
     try {
+      // watchdog: a job started elsewhere (other tab / page refresh mid-
+      // evolution) must attach this UI to it, or rendering falls back to
+      // one jump per poll
+      if (!evolving && performance.now() - lastEvolveWatchdog > 3000) {
+        lastEvolveWatchdog = performance.now();
+        try {
+          const st = await api.evolveStatus();
+          if (st.state === "running" || st.state === "paused") beginEvolutionUI(st);
+        } catch { /* status probe is best-effort */ }
+      }
       const snap = await api.state(null);
       currentDays = snap.t_days;
+      if (evolving) {
+        // adaptive rate: EMA of the server's actual advance per wall second
+        // (chunk quantisation makes the configured speed inexact); soft
+        // position correction on top. Together these bound the tracking
+        // error to well under one chunk quantum - no visible hitches.
+        const wall = performance.now();
+        if (lastSnapWall) {
+          const inst = (snap.t_days - lastSnapDays) / ((wall - lastSnapWall) / 1000);
+          if (inst >= 0) evoSpeedDps = evoSpeedDps * 0.5 + inst * 0.5;
+        }
+        lastSnapDays = snap.t_days;
+        lastSnapWall = wall;
+        renderDays += (snap.t_days - renderDays) * 0.25;
+      } else {
+        renderDays = snap.t_days;
+        evoSpeedDps = 0;
+        lastSnapWall = 0;
+      }
       timeline.setClock(currentDays);
       scene.setSnapshot(snap);
       scene.updateTrails();
-      scene.update(snap.t_days);
       onTimeChanged();          // irradiation/chart marker follow the clock
     } catch { /* transient server busy: keep last snapshot */ }
   }
@@ -107,11 +139,16 @@ async function boot() {
   $("#btn-focus").addEventListener("click", () => scene.focusSelected());
   $("#btn-grid").addEventListener("click", () => scene.toggleGrid());
 
-  // render loop (scene-side; timeline runs its own rAF for state)
-  (function frame() {
+  // render loop: the render clock advances every frame during evolution
+  let lastFrameT = performance.now();
+  (function frame(now) {
+    const dt = Math.min(((now || performance.now()) - lastFrameT) / 1000, 0.25);
+    lastFrameT = now || performance.now();
+    if (evolving && evoSpeedDps > 0) renderDays += evoSpeedDps * dt;
+    scene.update(renderDays);
     scene.render();
     requestAnimationFrame(frame);
-  })();
+  })(performance.now());
 
   // ---------------- evolution (推演: irreversible, autosaves the world) ----------------
   // Control flow (user spec 2026-11-15):
@@ -170,6 +207,8 @@ async function boot() {
 
   function beginEvolutionUI(st) {
     evolving = true;
+    evoSpeedDps = st.speed ?? 0;          // until the estimator takes over
+    lastSnapWall = 0;
     lockWorldUI(true);
     timeline.setEvolve(st.end_days - st.start_days);
     timeline.setPlaying(true);
@@ -195,6 +234,11 @@ async function boot() {
     let st;
     try { st = await api.evolveStatus(); } catch { return; }
     timeline.setProgress(st.progress || 0);
+    if (st.state !== "running") {
+      evoSpeedDps = 0;                      // freeze exactly
+      lastSnapWall = 0;
+      renderDays = st.done_days;
+    }
     applyEvolutionState(st);
     if (["done", "cancelled", "error"].includes(st.state)) {
       clearInterval(evTimer);
