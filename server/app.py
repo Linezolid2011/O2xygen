@@ -24,6 +24,7 @@ from o2xygen.constants import AU, L_SUN, M_EARTH, M_SUN, R_EARTH_MEAN, R_SUN, gm
 from o2xygen.kepler import Elements, elements_to_state
 from o2xygen.system import System, Body, STAR, BODY
 from o2xygen.temperature import equilibrium_temperature
+from o2xygen.nbody import IntegrateBudgetExceeded
 from o2xygen import mass_radius, structure as struct_mod
 from o2xygen import world as world_mod
 
@@ -137,7 +138,10 @@ def get_system():
 def get_state(t_days: float = 0.0):
     """Live N-body state at t_days: positions, velocities, masses,
     luminosities, osculating elements (vs origin), trails."""
-    return WS.state_at(t_days)
+    try:
+        return WS.state_at(t_days)
+    except IntegrateBudgetExceeded as e:
+        raise HTTPException(413, str(e))
 
 
 @app.get("/api/body/{name}")
@@ -145,7 +149,10 @@ def get_body(name: str, t_days: float = 0.0):
     b = SYSTEM.bodies.get(name)
     if b is None:
         raise HTTPException(404, f"no body '{name}'")
-    got = WS.flux_at(name, t_days)
+    try:
+        got = WS.flux_at(name, t_days)
+    except IntegrateBudgetExceeded as e:
+        raise HTTPException(413, str(e))
     ill = got["illumination"]
     osc = got["snapshot"]["elements"].get(name)
     flux = ill["total"]

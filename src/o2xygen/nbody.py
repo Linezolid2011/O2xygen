@@ -23,6 +23,13 @@ from .constants import G, DAY
 from .system import System
 
 
+class IntegrateBudgetExceeded(RuntimeError):
+    """A requested time leap exceeds the per-call integration step budget."""
+
+
+MAX_INTEGRATE_STEPS = 20_000_000      # ~1-2 min wall at IAS15 speeds
+
+
 @dataclass
 class OsculatingElements:
     """Orbital elements of a body relative to its parent, from live state."""
@@ -187,8 +194,18 @@ class NBodySimulation:
 
     # ------------------------------------------------------------- integration
     def integrate_to(self, t_s: float, record_checkpoints: bool = True) -> None:
-        """Advance (or rewind) the live simulation, archiving checkpoints."""
+        """Advance (or rewind) the live simulation, archiving checkpoints.
+        Raises IntegrateBudgetExceeded if the leap needs more than
+        MAX_INTEGRATE_STEPS fixed steps - unbounded leaps would hang the
+        shared workspace lock (a user-typed span of 1e6 yr at dt=0.17 d is
+        billions of steps)."""
         t_s = float(t_s)
+        need = int(abs(t_s - self.sim.t) / self.dt_s) + 1
+        if need > MAX_INTEGRATE_STEPS:
+            raise IntegrateBudgetExceeded(
+                f"leap of {(t_s - self.sim.t)/DAY:.3g} d needs ~{need} steps "
+                f"> budget {MAX_INTEGRATE_STEPS} (dt={self.dt_s/DAY:.3g} d): "
+                "shrink the span or raise dt")
         direction = 1.0 if t_s >= self.sim.t else -1.0
         self.sim.dt = self.dt_s * direction
         while (t_s - self.sim.t) * direction > 0.5 * self.dt_s:

@@ -12,7 +12,7 @@ import threading
 import numpy as np
 
 from o2xygen.constants import DAY, M_SUN
-from o2xygen.nbody import NBodySimulation
+from o2xygen.nbody import NBodySimulation, IntegrateBudgetExceeded, MAX_INTEGRATE_STEPS
 from o2xygen.system import System
 
 EVOLVE_CADENCE_S = 1.0 * 365.25 * DAY   # stellar evolution update cadence
@@ -76,10 +76,14 @@ class Workspace:
         return True
 
     def _evolve_between(self, t_from: float, t_to: float) -> None:
-        """Apply adiabatic stellar evolution on cadence stops in (t_from, t_to]."""
+        """Apply adiabatic stellar evolution on cadence stops in (t_from, t_to].
+        Cadence is adaptive: at most ~1000 evolution updates per leap, so a
+        user-typed million-year span can never degenerate into a million
+        one-year integrate calls."""
         if t_to <= t_from:
             return
-        cad = EVOLVE_CADENCE_S
+        span = t_to - t_from
+        cad = max(EVOLVE_CADENCE_S, span / 200.0)
         tau = np.ceil(t_from / cad) * cad
         while tau <= t_to + 0.5:
             self.sim.integrate_to(float(min(tau, t_to)))
@@ -94,6 +98,15 @@ class Workspace:
         (flux sampling) pass with_trails=False."""
         with self.lock:
             t_s = float(t_days) * DAY
+            # WHOLE-LEAP budget, checked BEFORE any integration: evolution
+            # cadence stops split a giant leap into per-call-legal chunks,
+            # so per-call checks alone cannot prevent a cumulative hang
+            need = int(abs(t_s - self.sim.t_s) / self.sim.dt_s) + 1
+            if need > MAX_INTEGRATE_STEPS:
+                raise IntegrateBudgetExceeded(
+                    f"leap of {t_days:.3g} d needs ~{need} steps > budget "
+                    f"{MAX_INTEGRATE_STEPS} (dt={self.sim.dt_s/DAY:.3g} d): "
+                    "shrink the span or raise dt")
             if not self._settled:
                 self._settled = self._apply_evolution_at(self.sim.t_s)
             self._evolve_between(self.sim.t_s, t_s)

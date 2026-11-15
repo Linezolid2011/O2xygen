@@ -13,7 +13,8 @@ import pytest
 from o2xygen.constants import AU, DAY, YEAR, M_SUN, M_EARTH, L_SUN, G
 from o2xygen.kepler import Elements, elements_to_state
 from o2xygen.system import System, Body, STAR, BODY
-from o2xygen.nbody import NBodySimulation
+from o2xygen.nbody import (NBodySimulation, rv_to_elements,
+                           IntegrateBudgetExceeded, MAX_INTEGRATE_STEPS)
 
 
 def place(sys, name, kind, around, a_m, e=0.0, inc=0.0, mass=0.0, m0=0.0,
@@ -206,6 +207,19 @@ def test_five_body_year_integration_stable_and_fast():
     d = np.linalg.norm(states["M1"][0] - states["P1"][0])
     assert d < 2.0 * 0.01 * AU
     assert wall < 20.0, f"1 simulated year took {wall:.1f}s wall"
+
+
+def test_leap_budget_rejects_absurd_spans():
+    """User-typed spans are unbounded; a million-year leap at dt~0.17 d is
+    billions of steps and would hang the shared workspace lock. Such leaps
+    must be rejected UP FRONT (2026-11-15 incident)."""
+    sys = five_body_system()
+    nb = NBodySimulation(sys)
+    max_leap_s = MAX_INTEGRATE_STEPS * nb.dt_s
+    with pytest.raises(IntegrateBudgetExceeded):
+        nb.integrate_to(max_leap_s * 2)
+    # a sane leap still works
+    nb.integrate_to(30 * DAY)
 
 
 def test_illumination_from_live_state():

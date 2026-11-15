@@ -106,8 +106,8 @@
       <div class="tl-ticks" id="tl-ticks"></div>
     </div>
     <div class="clock" id="clock">—</div>
-    <input id="span" class="mini-input" type="number" min="0.001" step="any" value="10"
-           title="时间轴跨度 (年,可输入任意值,如 5000)">
+    <input id="span" class="mini-input" type="number" min="0.001" max="20000" step="any" value="10"
+           title="时间轴跨度 (年,可输入任意值;单次积分有步数预算,过大跨度会被服务端拒绝)">
     <span class="unit">年</span>
     <span class="kep" id="engine-label">N-BODY · O₂xygen v<span id="app-version">…</span></span>
   </footer>
