@@ -75,18 +75,21 @@ class Workspace:
             b.extra["teff_k"] = v["teff_k"]       # and reddens
         return True
 
-    def _evolve_between(self, t_from: float, t_to: float) -> None:
+    def _evolve_between(self, t_from: float, t_to: float,
+                        record: bool = True) -> None:
         """Apply adiabatic stellar evolution on cadence stops in (t_from, t_to].
-        Cadence is adaptive: at most ~1000 evolution updates per leap, so a
+        Cadence is adaptive: at most ~200 evolution updates per leap, so a
         user-typed million-year span can never degenerate into a million
-        one-year integrate calls."""
+        one-year integrate calls. `record` propagates to the integrator
+        (evolution passes False: irreversible leaps archive no checkpoints)."""
         if t_to <= t_from:
             return
         span = t_to - t_from
         cad = max(EVOLVE_CADENCE_S, span / 200.0)
         tau = np.ceil(t_from / cad) * cad
         while tau <= t_to + 0.5:
-            self.sim.integrate_to(float(min(tau, t_to)))
+            self.sim.integrate_to(float(min(tau, t_to)),
+                                  record_checkpoints=record)
             self._apply_evolution_at(float(min(tau, t_to)))
             tau += cad
 

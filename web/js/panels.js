@@ -444,7 +444,7 @@ function renderTempTable(r) {
     Math.abs(row.d - tDays) < Math.abs(best.d - tDays) ? row : best, r.rows[0]);
   $("#tp-table").innerHTML = `
     <table class="temp-table">
-      <tr><th>距初始时刻 (天)</th><th>总辐照 (W/m²)</th><th>温度 (K)</th></tr>
+      <tr><th>时刻 (天,自原点)</th><th>总辐照 (W/m²)</th><th>温度 (K)</th></tr>
       ${r.rows.map((row) => `
         <tr class="${row === cur ? "temp-current" : ""}">
           <td>${fmt(row.d, 3)}</td><td>${fmt(row.flux, 3)}</td><td>${fmt(row.T, 3)}</td>

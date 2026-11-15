@@ -247,6 +247,12 @@ def temperature(name: str, req: TempReq):
     if b is None:
         raise HTTPException(404, f"no body '{name}'")
 
+    # Sample FORWARD FROM THE CURRENT sim time (irreversible-epoch
+    # semantics, 2026-11-15): looking back across the evolution boundary
+    # would force giant leap-backs (measured 12 s stalls) and contradict
+    # "the save has moved on". Rows carry absolute sim days.
+    base = WS.sim.t_s / DAY
+
     def sample(d):
         try:
             ill = WS.flux_at(name, d)["illumination"]
@@ -256,9 +262,9 @@ def temperature(name: str, req: TempReq):
                 "T": equilibrium_temperature(ill["total"], albedo=req.albedo,
                                              regime=req.regime)}
 
-    rows = [sample(req.span_days * i / max(req.n - 1, 1)) for i in range(req.n)]
+    rows = [sample(base + req.span_days * i / max(req.n - 1, 1)) for i in range(req.n)]
     n_dense = 400
-    dense = [sample(req.span_days * i / (n_dense - 1)) for i in range(n_dense)]
+    dense = [sample(base + req.span_days * i / (n_dense - 1)) for i in range(n_dense)]
     return {"rows": rows, "dense": dense, "albedo": req.albedo, "regime": req.regime}
 
 
@@ -451,6 +457,21 @@ def evolve_speed(req: EvolveSpeedReq):
 def evolve_status():
     j = _EVOLUTION["job"]
     return j.status() if j is not None else {"state": "idle"}
+
+
+@app.get("/api/debug/metrics")
+def debug_metrics():
+    """Temporary diagnostics: checkpoint archive size, process RSS, lock feel."""
+    import os
+    try:
+        import psutil
+        rss_mb = psutil.Process(os.getpid()).memory_info().rss / 1e6
+    except Exception:
+        rss_mb = -1
+    return {"checkpoints": len(WS.sim._cp_times),
+            "sim_t_days": WS.sim.t_s / DAY,
+            "checkpoint_span_days": (WS.sim._cp_times[-1] - WS.sim._cp_times[0]) / DAY if WS.sim._cp_times else 0,
+            "rss_mb": rss_mb}
 
 
 # ------------------------------------------------------------- worlds -------

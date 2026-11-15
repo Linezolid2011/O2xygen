@@ -21,8 +21,13 @@ from o2xygen.constants import DAY
 from o2xygen.nbody import MAX_INTEGRATE_STEPS
 from o2xygen import world as world_mod
 
-WALL_CHUNK_S = 0.4          # integrate ~0.4 s of wall time per iteration
+WALL_CHUNK_S = 0.4          # target wall time per outer iteration
 AUTOSAVE_INTERVAL_S = 0.5   # rewrite the save at most every 0.5 s wall
+# Per-LOCK-HOLD step budget: one integration chunk must never hold the
+# workspace lock long enough to starve interactive requests (measured
+# 2026-11-15: a ~2.4M-step chunk locked the API out for ~7 s at high speed).
+# Speeds above ~CHUNK/dt are CPU-bound and simply run at this rate.
+CHUNK_STEP_BUDGET = 200_000
 
 
 class EvolutionJob:
@@ -97,7 +102,7 @@ class EvolutionJob:
 
     def _run(self):
         ws = self.ws
-        budget_days = MAX_INTEGRATE_STEPS * ws.sim.dt_s / DAY
+        chunk_days = CHUNK_STEP_BUDGET * ws.sim.dt_s / DAY
         next_save = time.time() + AUTOSAVE_INTERVAL_S
         try:
             while True:
@@ -111,18 +116,18 @@ class EvolutionJob:
                 sim_now = ws.sim.t_s / DAY
                 if sim_now >= self.end_days:
                     break
+                # chunk by STEP BUDGET (bounded lock hold), not by wall wish;
+                # irreversible evolution never records checkpoints - the save
+                # has moved on, scrubbing back into it is meaningless
                 owe_days = min(self.speed * WALL_CHUNK_S,
+                               chunk_days,
                                self.end_days - sim_now)
                 t0 = time.time()
                 with ws.lock:
-                    remaining = owe_days
-                    while remaining > 0 and self.state == "running":
-                        sub = min(remaining, budget_days)
-                        t_from = ws.sim.t_s
-                        t_to = t_from + sub * DAY
-                        ws._evolve_between(t_from, t_to)
-                        ws.sim.integrate_to(t_to)
-                        remaining -= sub
+                    t_from = ws.sim.t_s
+                    t_to = t_from + owe_days * DAY
+                    ws._evolve_between(t_from, t_to, record=False)
+                    ws.sim.integrate_to(t_to, record_checkpoints=False)
                 self.done_days = ws.sim.t_s / DAY
                 if time.time() >= next_save:
                     self._autosave()

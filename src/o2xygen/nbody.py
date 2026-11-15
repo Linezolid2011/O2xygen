@@ -28,6 +28,17 @@ class IntegrateBudgetExceeded(RuntimeError):
 
 
 MAX_INTEGRATE_STEPS = 20_000_000      # ~1-2 min wall at IAS15 speeds
+MAX_CHECKPOINTS = 4_000               # archive thins beyond this (keeps epoch)
+
+
+def _thin_checkpoints(times: list, snaps: list):
+    """Halve archive density, always keeping the epoch snapshot. Bounds
+    memory of long sessions (unthinned growth measured at ~5000/s during
+    high-speed evolution)."""
+    keep = [0] + list(range(2, len(times), 2))
+    if keep[-1] != len(times) - 1:
+        keep.append(len(times) - 1)
+    return [times[i] for i in keep], [snaps[i] for i in keep]
 
 
 @dataclass
@@ -251,6 +262,9 @@ class NBodySimulation:
                 else:
                     self._cp_times.insert(0, float(self.sim.t))
                     self._cp_snaps.insert(0, snap)
+                if len(self._cp_times) > MAX_CHECKPOINTS:
+                    self._cp_times, self._cp_snaps = _thin_checkpoints(
+                        self._cp_times, self._cp_snaps)
         # final polish: the loop may exit up to 0.5 dt short of t_s - land
         # exactly on the requested time
         if self.sim.t != t_s:
