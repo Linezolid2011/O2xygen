@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>O₂xygen · 世界观构造工作台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/vendor/uPlot.min.css">
+<link rel="stylesheet" href="/css/app.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <!-- ======================= top bar ======================= -->
+  <header id="topbar">
+    <div class="brand">
+      <div class="logo">O<sub>2</sub></div>
+      <div class="brand-text">
+        <div class="brand-name">O<sub>2</sub><sup>xygen</sup></div>
+        <div class="brand-sub">世界观构造工作台</div>
+      </div>
+      <span class="beta">BETA</span>
+    </div>
+    <div class="crumb">
+      <span class="crumb-item">工作空间</span>
+      <span class="crumb-sep">›</span>
+      <span class="crumb-item active" id="ws-name">白玫瑰</span>
+    </div>
+    <div class="topbar-right">
+      <span class="saved-hint" id="grid-status"></span>
+      <button class="btn accent" id="btn-pipeline">⚡ 一键计算</button>
+    </div>
+  </header>
+
+  <!-- ======================= main ======================= -->
+  <div id="main">
+    <aside id="sidebar">
+      <div class="mode-tabs">
+        <button class="mode-tab active">编辑模式</button>
+        <button class="mode-tab">查看模式</button>
+      </div>
+      <div class="catalog-head">
+        <span>天体目录</span><span class="catalog-count" id="catalog-count">0</span>
+      </div>
+      <div class="catalog-search">
+        <input type="text" id="catalog-filter" placeholder="搜索天体…  ">
+      </div>
+      <ul id="catalog"></ul>
+      <button class="btn ghost add-body" id="btn-add-body">＋ 添加天体</button>
+      <div class="sidebar-foot">● 本地工作空间</div>
+    </aside>
+
+    <section id="viewport-wrap">
+      <canvas id="gl"></canvas>
+      <div id="view-toggle" class="pill-group">
+        <button class="pill active" data-mode="3d">⬡ 3D 空间</button>
+        <button class="pill" data-mode="2d">◉ 2D 示意</button>
+      </div>
+      <div id="view-actions">
+        <button class="icon-btn" id="btn-focus" title="聚焦选中天体">⌖</button>
+        <button class="icon-btn" id="btn-grid" title="参考网格">▦</button>
+      </div>
+      <div id="axis-gizmo"><canvas id="gizmo-canvas" width="72" height="72"></canvas></div>
+      <div id="body-labels"></div>
+      <div id="view-hint">左键旋转 · 右键平移 · 滚轮缩放 · 点击天体选中</div>
+    </section>
+
+    <aside id="panel">
+      <div class="panel-head">
+        <div class="body-title">
+          <span class="body-swatch" id="body-swatch"></span>
+          <h2 id="body-name">—</h2>
+        </div>
+        <span class="kind-chip" id="body-kind">—</span>
+      </div>
+      <nav id="panel-tabs">
+        <button class="ptab active" data-tab="params">基础参数</button>
+        <button class="ptab" data-tab="structure">结构</button>
+        <button class="ptab" data-tab="atmosphere">大气</button>
+        <button class="ptab" data-tab="temperature">温度表</button>
+        <button class="ptab" data-tab="intro">介绍</button>
+      </nav>
+      <div id="panel-body">
+        <section class="tab-page active" id="tab-params"></section>
+        <section class="tab-page" id="tab-structure"></section>
+        <section class="tab-page" id="tab-atmosphere"></section>
+        <section class="tab-page" id="tab-temperature"></section>
+        <section class="tab-page" id="tab-intro"></section>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ======================= timeline ======================= -->
+  <footer id="timeline">
+    <button class="play-btn" id="btn-play" title="播放/暂停 (空格)">▶</button>
+    <input id="speed" class="mini-input" type="number" min="0.0001" step="any" value="1"
+           title="播放速度 (天/秒,可输入任意值)">
+    <span class="unit">天/秒</span>
+    <div class="tl-track">
+      <input type="range" id="tl-slider" min="0" max="3652.5" step="0.1" value="0">
+      <div class="tl-ticks" id="tl-ticks"></div>
+    </div>
+    <div class="clock" id="clock">—</div>
+    <input id="span" class="mini-input" type="number" min="0.001" step="any" value="10"
+           title="时间轴跨度 (年,可输入任意值,如 5000)">
+    <span class="unit">年</span>
+    <span class="kep" id="engine-label">N-BODY · O₂xygen v<span id="app-version">…</span></span>
+  </footer>
+</div>
+
+<!-- ======================= pipeline modal ======================= -->
+<div class="modal-mask" id="pipeline-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-eyebrow">O2XYGEN WORKSPACE</div>
+        <h3>一键求解进度</h3>
+      </div>
+      <button class="icon-btn" id="pipeline-close">✕</button>
+    </div>
+    <ul id="pipeline-stages"></ul>
+    <div class="progress"><div class="progress-fill" id="pipeline-fill"></div></div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="pipeline-cancel">取消计算</button>
+      <span id="pipeline-status"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= add body modal ======================= -->
+<div class="modal-mask" id="add-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-eyebrow">O2XYGEN WORKSPACE</div>
+        <h3>添加天体</h3>
+      </div>
+      <button class="icon-btn" id="add-close">✕</button>
+    </div>
+    <div class="form-grid">
+      <label>名称<input id="add-name" placeholder="例如:Elpis"></label>
+      <label>类型
+        <select id="add-kind"><option value="planet">行星</option><option value="moon">卫星</option></select>
+      </label>
+      <label>环绕天体<select id="add-parent"></select></label>
+      <label>半长轴 (AU)<input id="add-a" type="number" step="0.01" value="1.0"></label>
+      <label>偏心率<input id="add-e" type="number" step="0.01" min="0" max="0.9" value="0.05"></label>
+      <label>质量 (M⊕)<input id="add-mass" type="number" step="0.1" value="1.0"></label>
+    </div>
+    <div class="modal-foot">
+      <span id="add-error" class="err"></span>
+      <button class="btn ghost" id="add-cancel">取消</button>
+      <button class="btn accent" id="add-confirm">创建</button>
+    </div>
+  </div>
+</div>
+
+<script src="/vendor/uPlot.min.js"></script>
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
