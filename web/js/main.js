@@ -48,12 +48,15 @@ async function boot() {
   let selected = null;
 
   let scene = null;             // set below; timeline callbacks fire later
+  let currentDays = 0;          // latest server sim time (snapshot)
+  let evolving = false;
+
+  // Time ONLY moves via 推演 (user spec 2026-11-15): in idle mode the
+  // timeline is inert (NaN ticks, dead play button); during evolution the
+  // same bar shows the time scale + progress and the play button toggles
+  // pause/resume.
   const timeline = initTimeline({
-    onTimeChanged: () => {
-      scene?.update(timeline.days);
-      onTimeChanged();
-    },
-    onWrap: () => { pollState(true); },   // timeline looped: re-seed client
+    onEvolveToggle: () => { toggleEvolutionPause(); },
   });
 
   scene = new OrbitScene($("#gl"), system, {
@@ -61,30 +64,26 @@ async function boot() {
   });
   window.__scene = scene;      // debug/test hook
 
-  // ---- live N-body snapshots (ADR-0015): server integrates, client
-  // extrapolates p + v·Δt between polls; trails refresh per snapshot.
-  let snapReqT = null;
-  let evolving = false;
-  async function pollState(force = false) {
-    if (evolving) return;               // the evolution job drives the clock
-    const t = timeline.days;
-    if (!force && snapReqT !== null && Math.abs(t - snapReqT) < 0.5) return;
-    snapReqT = t;
+  // ---- live N-body snapshots (ADR-0015) at the CURRENT sim time. The
+  // client propagates between polls; trails refresh per snapshot.
+  async function pollState() {
     try {
-      const snap = await api.state(t);
+      const snap = await api.state(null);
+      currentDays = snap.t_days;
+      timeline.setClock(currentDays);
       scene.setSnapshot(snap);
       scene.updateTrails();
+      scene.update(snap.t_days);
+      onTimeChanged();          // irradiation/chart marker follow the clock
     } catch { /* transient server busy: keep last snapshot */ }
   }
-  await pollState(true);
+  await pollState();
   setInterval(pollState, 800);
-
-  scene.update(timeline.days); // place bodies BEFORE any user click can land
 
   const panelCtx = {
     system,
-    getTimeDays: () => timeline.days,
-    getSpanDays: () => timeline.span,
+    getTimeDays: () => currentDays,
+    getSpanDays: () => timeline.spanDays,
   };
   initPanels(panelCtx);
 
@@ -114,116 +113,96 @@ async function boot() {
     requestAnimationFrame(frame);
   })();
 
-  // ---------------- evolution modal (推演: irreversible, autosaves the world) ----------------
+  // ---------------- evolution (推演: irreversible, autosaves the world) ----------------
+  // Control flow (user spec 2026-11-15):
+  //   idle    — 推演 button is orange and opens the setup modal; the
+  //             bottom-left play button is greyed and inert; timeline
+  //             ticks are all "NaN".
+  //   running — 推演 button greyed/unclickable; play button is orange and
+  //             toggles pause/resume; the timeline shows time scale+progress.
+  //   paused  — 推演 button turns RED "取消": click (with confirm) cancels
+  //             the evolution outright; resuming turns it back to grey.
+  //   done / cancelled — back to idle.
   const evModal = $("#evolve-modal");
   const evYears = $("#evolve-years"), evSpeed = $("#evolve-speed");
-  const evStartBtn = $("#evolve-start"), evPauseBtn = $("#evolve-pause"),
-        evCancelBtn = $("#evolve-cancel"), evCloseBtn = $("#evolve-close");
-  const evFill = $("#evolve-fill"), evStatus = $("#evolve-status"), evErr = $("#evolve-err");
+  const evStartBtn = $("#evolve-start"), evCloseBtn = $("#evolve-close");
+  const evErr = $("#evolve-err");
+  const evBtn = $("#btn-evolve");
   let evTimer = null;
 
-  $("#btn-evolve").addEventListener("click", async () => {
-    $("#evolve-world").textContent = system.world ?? system.name;
-    evModal.hidden = false;
-    evErr.textContent = "";
-    try {
-      const st = await api.evolveStatus();
-      if (st.state === "running" || st.state === "paused") attachEvolution();
-    } catch { /* server down: modal still opens for the error on start */ }
-  });
-  evCloseBtn.addEventListener("click", () => {
-    if (evolving) return;                       // 推演进行中不可关闭
-    evModal.hidden = true;
-  });
+  function setEvolveButton(state) {
+    evBtn.classList.toggle("danger", state === "paused");
+    evBtn.textContent = state === "paused" ? "✕ 取消推演" : "⏩ 推演";
+    evBtn.disabled = state === "running";
+  }
 
-  function lockTimeline(on) {
-    for (const id of ["tl-slider", "btn-play", "speed", "span",
-                      "world-select", "btn-world-save", "btn-pipeline"]) {
+  function lockWorldUI(on) {
+    for (const id of ["world-select", "btn-world-save", "btn-pipeline"]) {
       const el = document.getElementById(id);
       if (el) el.disabled = on;
     }
-    // 进度条不可拖动,只显示已推演占比
-    const slider = document.getElementById("tl-slider");
-    if (on) { slider.max = 1000; slider.value = 0; }
-    else { slider.max = timeline.span; slider.value = timeline.days; }
   }
+
+  evBtn.addEventListener("click", async () => {
+    if (evolving) {
+      // only reachable while PAUSED (running state greys the button out)
+      if (!confirm("彻底取消推演?\n\n将回退到上次自动存档(约 0.5 秒内),此后无法恢复。")) return;
+      try { await api.evolveCancel(); }
+      catch (e) { alert(e.message); }
+      return;
+    }
+    $("#evolve-world").textContent = system.world ?? system.name;
+    evErr.textContent = "";
+    evModal.hidden = false;
+  });
+  evCloseBtn.addEventListener("click", () => { evModal.hidden = true; });
 
   evStartBtn.addEventListener("click", async () => {
     const years = parseFloat(evYears.value), dps = parseFloat(evSpeed.value);
     if (!(years > 0) || !(dps > 0)) { evErr.textContent = "时长与速度必须为正"; return; }
     evErr.textContent = "";
     try {
-      await api.evolveStart(years * 365.25, dps);
-      attachEvolution();
+      const st = await api.evolveStart(years * 365.25, dps);
+      evModal.hidden = true;                      // 开始推演即退出弹窗
+      beginEvolutionUI(st);
     } catch (e) { evErr.textContent = e.message; }
   });
 
-  evPauseBtn.addEventListener("click", async () => {
-    const st = await api.evolveStatus();
-    if (st.state === "running") await api.evolvePause();
-    else if (st.state === "paused") await api.evolveResume();
-    refreshEvolveControls(await api.evolveStatus());
-  });
-  evCancelBtn.addEventListener("click", async () => {
-    try { refreshEvolveControls(await api.evolveCancel()); }
-    catch (e) { evErr.textContent = e.message; }
-  });
-  evSpeed.addEventListener("change", async () => {
-    const st = await api.evolveStatus();
-    if (st.state !== "paused") return;
-    try { await api.evolveSpeed(parseFloat(evSpeed.value)); }
-    catch (e) { evErr.textContent = e.message; }
-  });
-
-  function attachEvolution() {
+  function beginEvolutionUI(st) {
     evolving = true;
-    lockTimeline(true);
-    evStartBtn.disabled = true;
-    evYears.disabled = true;                      // 最大推演时长开始后不可修改
-    evCloseBtn.disabled = true;
-    refreshEvolveControls({ state: "running" });
+    lockWorldUI(true);
+    timeline.setEvolve(st.end_days - st.start_days);
+    timeline.setPlaying(true);
+    setEvolveButton("running");
     clearInterval(evTimer);
     evTimer = setInterval(tickEvolution, 500);
   }
 
-  function refreshEvolveControls(st) {
-    const paused = st.state === "paused";
-    evPauseBtn.disabled = !(st.state === "running" || paused);
-    evPauseBtn.textContent = paused ? "继续" : "暂停";
-    evCancelBtn.disabled = !paused;               // 仅暂停后可取消
-    evSpeed.disabled = !paused;                   // 仅暂停后可改速度
+  async function toggleEvolutionPause() {
+    let st;
+    try { st = await api.evolveStatus(); } catch { return; }
+    if (st.state === "running") st = await api.evolvePause();
+    else if (st.state === "paused") st = await api.evolveResume();
+    applyEvolutionState(st);
+  }
+
+  function applyEvolutionState(st) {
+    timeline.setPlaying(st.state === "running");
+    setEvolveButton(st.state === "paused" ? "paused" : "running");
   }
 
   async function tickEvolution() {
     let st;
-    try { st = await api.evolveStatus(); }
-    catch { return; }
-    const pct = Math.round((st.progress || 0) * 1000) / 10;
-    evFill.style.width = `${st.progress * 100}%`;
-    document.getElementById("tl-slider").value = (st.progress || 0) * 1000;
-    const days = Math.round(st.done_days - st.start_days);
-    evStatus.textContent = { running: `推演中 ${pct}% (+${days} 天)`,
-                             paused: `已暂停 ${pct}% (+${days} 天)`,
-                             done: `推演完成(已推演 ${days} 天,存档已更新)`,
-                             cancelled: `已取消(保留至上次自动存档,约 0.5 秒内)`,
-                             error: `推演出错:${st.error}` }[st.state] || st.state;
-    refreshEvolveControls(st);
-    // scene follows the job's clock
-    try {
-      const snap = await api.state(null);
-      scene.setSnapshot(snap);
-      scene.updateTrails();
-      scene.update(snap.t_days);
-      onTimeChanged();
-    } catch { /* transient */ }
+    try { st = await api.evolveStatus(); } catch { return; }
+    timeline.setProgress(st.progress || 0);
+    applyEvolutionState(st);
     if (["done", "cancelled", "error"].includes(st.state)) {
       clearInterval(evTimer);
       evolving = false;
-      lockTimeline(false);
-      evStartBtn.disabled = false;
-      evYears.disabled = false;
-      evSpeed.disabled = false;
-      evCloseBtn.disabled = false;
+      timeline.setIdle();
+      timeline.setPlaying(false);
+      setEvolveButton("idle");
+      lockWorldUI(false);
       if (st.state === "done") await refreshWorlds();
     }
   }
@@ -282,7 +261,7 @@ async function boot() {
       li[0].classList.add("running");
       li[0].querySelector(".st").textContent = "正在求解…";
       const t0 = performance.now();
-      const res = await api.pipeline({ body: bodyName, span_days: timeline.span, n_samples: 13 });
+      const res = await api.pipeline({ body: bodyName, span_days: timeline.spanDays, n_samples: 13 });
       const minMs = 900;                      // let the progress read, like his dialog
       const wait = Math.max(0, minMs - (performance.now() - t0));
       await new Promise((r) => setTimeout(r, wait));

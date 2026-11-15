@@ -235,6 +235,10 @@ tr.temp-current td { color: var(--accent); font-weight: 600; background: var(--a
 .unit { font-size: 11px; color: #6a7183; margin-left: -4px; margin-right: 6px; }
 .modal-note { font-size: 11px; color: #6a7183; margin: 4px 2px 0; line-height: 1.5; }
 .modal-note.warn { color: #d8a97a; }
+.btn.danger { background: #7a2e2e; border-color: #a04a4a; color: #ffd9d9; }
+.btn.danger:hover { background: #8f3535; }
+.play-btn:disabled { opacity: 0.35; cursor: default; }
+input:disabled { opacity: 0.4; cursor: default; }
 .tl-track { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .tl-track input[type="range"] { width: 100%; }
 .tl-ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-faint); padding: 0 2px; }

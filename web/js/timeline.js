@@ -1,7 +1,10 @@
-// Bottom timeline: play/pause, typable speed (天/秒), typable span (年),
-// scrub, dynamic tick labels, "yyyy-mm-dd From origin" clock (ADR-0016:
-// time = seconds since the world origin; the calendar is a uniform display
-// convention - 365.25 d/yr, 12 equal months).
+// Bottom timeline. Two modes (user spec, 2026-11-15):
+//   idle     — the bar is INERT: tick labels are all "NaN", the play button
+//              is greyed and clicks do nothing. Time only moves via 推演.
+//   evolve   — during evolution the bar shows the real time scale and the
+//              progress (evolved portion); the play button is orange and
+//              toggles evolution pause/resume.
+// The "[time] From origin" clock always shows the current sim time.
 const YEAR_D = 365.25;
 
 export function fmtFromOrigin(days) {
@@ -37,91 +40,55 @@ export function initTimeline(callbacks) {
   const ticksEl = document.getElementById("tl-ticks");
   const clock = document.getElementById("clock");
 
-  const state = {
-    days: 0,
-    span: parseFloat(spanIn.value) * YEAR_D,     // stored in days
-    playing: false,
-    speed: parseFloat(speedIn.value),            // days per second
-  };
+  let mode = "idle";
+  let totalDays = 0;
 
-  function renderTicks() {
+  function renderTicks(labels) {
     ticksEl.innerHTML = "";
-    for (let i = 0; i <= 5; i++) {
+    for (const t of labels) {
       const s = document.createElement("span");
-      s.textContent = fmtTick((state.span * i) / 5);
+      s.textContent = t;
       ticksEl.appendChild(s);
     }
   }
 
-  function applySpan() {
-    const years = parseFloat(spanIn.value);
-    if (!isFinite(years) || years <= 0) { spanIn.value = (state.span / YEAR_D); return; }
-    state.span = years * YEAR_D;
-    slider.max = state.span;
-    slider.step = Math.max(state.span / 2000, 0.001);   // keep scrubbing smooth
-    state.days = Math.min(state.days, state.span);
-    slider.value = state.days;
-    renderTicks();
-    callbacks.onTimeChanged(state.days);
-    updateClock();
+  function setIdle() {
+    mode = "idle";
+    slider.disabled = true;
+    slider.max = 1000;
+    slider.value = 0;
+    playBtn.disabled = true;
+    playBtn.textContent = "▶";
+    speedIn.disabled = true;
+    renderTicks(["NaN", "NaN", "NaN", "NaN", "NaN", "NaN"]);
   }
 
-  function applySpeed() {
-    const v = parseFloat(speedIn.value);
-    state.speed = isFinite(v) && v > 0 ? v : 1;
-    speedIn.value = state.speed;
+  function setEvolve(durationDays) {
+    mode = "evolve";
+    totalDays = durationDays;
+    slider.disabled = true;                 // 进度条不可拖动,只显示占比
+    slider.max = 1000;
+    slider.value = 0;
+    playBtn.disabled = false;
+    playBtn.textContent = "❚❚";
+    speedIn.disabled = true;
+    const labels = [];
+    for (let i = 0; i <= 5; i++) labels.push(fmtTick((totalDays * i) / 5));
+    renderTicks(labels);
   }
 
-  slider.addEventListener("input", () => {
-    state.days = parseFloat(slider.value);
-    callbacks.onTimeChanged(state.days);
-    updateClock();
-  });
-  speedIn.addEventListener("change", applySpeed);
-  speedIn.addEventListener("keydown", (e) => { if (e.key === "Enter") speedIn.blur(); });
-  spanIn.addEventListener("change", applySpan);
-  spanIn.addEventListener("keydown", (e) => { if (e.key === "Enter") spanIn.blur(); });
-  playBtn.addEventListener("click", toggle);
-  window.addEventListener("keydown", (e) => {
-    if (e.code === "Space" && !/INPUT|SELECT|TEXTAREA|BUTTON|A/.test(document.activeElement.tagName)) {
-      e.preventDefault();
-      toggle();
-    }
+  playBtn.addEventListener("click", () => {
+    if (mode === "evolve") callbacks.onEvolveToggle?.();
   });
 
-  function toggle() {
-    state.playing = !state.playing;
-    playBtn.textContent = state.playing ? "❚❚" : "▶";
-  }
-
-  function updateClock() {
-    clock.textContent = fmtFromOrigin(state.days);
-  }
-
-  renderTicks();
-  updateClock();
-
-  // main-loop advance hook
-  let last = performance.now();
-  function tick(now) {
-    const dt = Math.min((now - last) / 1000, 0.25);
-    last = now;
-    if (state.playing) {
-      state.days += state.speed * dt;
-      if (state.days > state.span) {
-        state.days = 0;                                // loop the timeline
-        callbacks.onWrap?.();                          // force a fresh snapshot
-      }
-      slider.value = state.days;
-      callbacks.onTimeChanged(state.days);
-      updateClock();
-    }
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
+  setIdle();
 
   return {
-    get days() { return state.days; },
-    get span() { return state.span; },
+    setIdle,
+    setEvolve,
+    setProgress(p) { slider.value = Math.max(0, Math.min(1, p)) * 1000; },
+    setPlaying(on) { playBtn.textContent = on ? "❚❚" : "▶"; },
+    setClock(days) { clock.textContent = fmtFromOrigin(days); },
+    get spanDays() { return (parseFloat(spanIn.value) || 10) * YEAR_D; },
   };
 }

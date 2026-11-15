@@ -147,12 +147,10 @@
       <label>推演时长 (年)<input id="evolve-years" type="number" min="0.001" step="any" value="100"></label>
       <label>速度 (天/秒)<input id="evolve-speed" type="number" min="0.001" max="1000000" step="any" value="30"></label>
     </div>
-    <div class="progress" style="margin-top:10px"><div class="progress-fill" id="evolve-fill"></div></div>
-    <div class="modal-note" id="evolve-status">尚未开始</div>
+    <p class="modal-note">开始后可用左下角 ▶/❚❚ 暂停或恢复;暂停时左上角"推演"
+    按钮变为红色的"取消推演"。进度显示在底部时间轴上。</p>
     <div class="modal-foot">
       <button class="btn accent" id="evolve-start">开始推演</button>
-      <button class="btn" id="evolve-pause" disabled>暂停</button>
-      <button class="btn ghost" id="evolve-cancel" disabled>取消推演</button>
       <span id="evolve-err" class="err"></span>
     </div>
   </div>
