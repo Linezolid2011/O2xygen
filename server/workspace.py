@@ -113,7 +113,11 @@ class Workspace:
             if not self._settled:
                 self._settled = self._apply_evolution_at(self.sim.t_s)
             self._evolve_between(self.sim.t_s, t_s)
-            self.sim.integrate_to(t_s)
+            # polls that lag the job by less than one checkpoint cadence are
+            # not scrubs: integrate without archiving (a burst of backward
+            # checkpoints on every poll was measured: +315 entries in 3 s)
+            record = abs(t_s - self.sim.t_s) > self.sim.checkpoint_every_s
+            self.sim.integrate_to(t_s, record_checkpoints=record)
             states = self.sim.live_state()
             ps = self.sim.sim.particles
             idx = self.sim._index
