@@ -4,6 +4,7 @@ import { OrbitControls } from "/vendor/OrbitControls.js";
 import { NBodyPropagator, AU, DAY } from "./kepler.js";
 
 const texLoaderCache = {};
+const _followDelta = new THREE.Vector3();
 function glowTexture() {
   if (texLoaderCache.glow) return texLoaderCache.glow;
   const c = document.createElement("canvas");
@@ -160,9 +161,10 @@ export class OrbitScene {
   }
 
   buildTrails() {
-    /** Smoke trails: actual integrated paths from the server (ADR-0015).
-     *  Head (near the body) is bright, tail fades out - like smoke. */
+    /** Smoke trails: actual integrated paths from the server (ADR-0015),
+     *  extended client-side between snapshots (sampleTrails). */
     this.trailByName = {};
+    this.trailBuf = {};
     for (const b of this.system.bodies) {
       if (b.name === this.system.origin) continue;      // origin defines the frame
       const geo = new THREE.BufferGeometry();
@@ -212,30 +214,54 @@ export class OrbitScene {
     }
   }
 
-  /** Rebuild smoke trails from the snapshot's integrated paths. */
-  updateTrails() {
-    if (!this.snap?.trails) return;
+  /** Fade-gradient line geometry from oldest->newest points. */
+  _trailGeometry(points, baseColor) {
+    const n = points.length;
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    const bg = new THREE.Color(0x0a0c11);              // scene background
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = points[i][0]; pos[i * 3 + 1] = points[i][1]; pos[i * 3 + 2] = points[i][2];
+      const k = Math.pow(i / (n - 1), 1.6);            // newest = full colour
+      const c = bg.clone().lerp(baseColor, k);
+      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    return geo;
+  }
+
+  /** Anchor the smoke to the server's integrated paths (per snapshot). */
+  updateTrails(snap = this.snap) {
+    if (!snap?.trails) return;
     for (const [name, t] of Object.entries(this.trailByName)) {
-      const data = this.snap.trails[name];
-      if (!data || data.points.length < 2) { t.line.visible = false; continue; }
+      const data = snap.trails[name];
+      if (!data || data.points.length < 2) { t.line.visible = false; this.trailBuf[name] = null; continue; }
       t.line.visible = true;
-      const pts = data.points;
-      const n = pts.length;
-      const pos = new Float32Array(n * 3);
-      const col = new Float32Array(n * 3);
-      const bg = new THREE.Color(0x0a0c11);          // scene background
-      for (let i = 0; i < n; i++) {
-        pos[i * 3] = pts[i][0]; pos[i * 3 + 1] = pts[i][1]; pos[i * 3 + 2] = pts[i][2];
-        // head (i=0, newest) = full colour; tail fades into the background
-        const k = Math.pow(1 - i / (n - 1), 1.6);
-        const c = bg.clone().lerp(t.baseColor, k);
-        col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
-      }
+      const pts = data.points.slice().reverse();       // server newest-first -> oldest-first
+      const stride = data.window_days / 90;
+      this.trailBuf[name] = { pts, stride, nextAt: snap.t_days + stride };
       t.line.geometry.dispose();
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-      t.line.geometry = geo;
+      t.line.geometry = this._trailGeometry(pts, t.baseColor);
+    }
+  }
+
+  /** Client-side smoke continuation: sample the render clock into the ring
+   *  buffer every frame so the smoke scrolls smoothly between server
+   *  anchors (same philosophy as the position render clock). */
+  sampleTrails(renderDays) {
+    if (!this.propagator || !this.system.origin) return;
+    const o = this.propagator.pos(this.system.origin);
+    for (const [name, t] of Object.entries(this.trailByName)) {
+      const buf = this.trailBuf?.[name];
+      if (!buf || renderDays < buf.nextAt) continue;
+      const p = this.propagator.pos(name);
+      buf.pts.push([p.x - o.x, p.y - o.y, p.z - o.z]);
+      if (buf.pts.length > 91) buf.pts.shift();
+      buf.nextAt += buf.stride;
+      t.line.geometry.dispose();
+      t.line.geometry = this._trailGeometry(buf.pts, t.baseColor);
     }
   }
 
@@ -301,6 +327,7 @@ export class OrbitScene {
 
   select(name) {
     this.selected = name;
+    this._followLast = null;               // follow starts from the new body
     for (const [n, div] of Object.entries(this.labelDivs)) {
       div.classList.toggle("sel", n === name);
       // names are user-supplied and persisted: textContent, never innerHTML
@@ -443,7 +470,26 @@ export class OrbitScene {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Keep the camera glued to the selected body's motion: apply its
+   *  frame-to-frame delta to both camera and target. Additive only - the
+   *  user's own pan/zoom is untouched. Without this, selecting a body
+   *  during evolution watches it drift out of frame. */
+  _follow() {
+    const g = this.selected ? this.bodyGroups[this.selected] : null;
+    if (!g) { this._followLast = null; return; }
+    const p = g.position;
+    if (this._followLast) {
+      _followDelta.copy(p).sub(this._followLast);
+      if (_followDelta.lengthSq() > 0) {
+        this.camera.position.add(_followDelta);
+        this.controls.target.add(_followDelta);
+      }
+    }
+    (this._followLast ??= new THREE.Vector3()).copy(p);
+  }
+
   render() {
+    this._follow();
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
     this.drawLabels();

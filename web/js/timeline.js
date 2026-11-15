@@ -59,11 +59,15 @@ export function initTimeline(callbacks) {
     slider.value = 0;
     playBtn.disabled = true;
     playBtn.textContent = "▶";
+    // 非推演模式:两个输入都显示 NaN 且不可改(用户规格 2026-11-15)
+    speedIn.value = "NaN";
     speedIn.disabled = true;
+    spanIn.value = "NaN";
+    spanIn.disabled = true;
     renderTicks(["NaN", "NaN", "NaN", "NaN", "NaN", "NaN"]);
   }
 
-  function setEvolve(durationDays) {
+  function setEvolve(durationDays, speed) {
     mode = "evolve";
     totalDays = durationDays;
     slider.disabled = true;                 // 进度条不可拖动,只显示占比
@@ -71,7 +75,11 @@ export function initTimeline(callbacks) {
     slider.value = 0;
     playBtn.disabled = false;
     playBtn.textContent = "❚❚";
-    speedIn.disabled = true;
+    // 推演模式:总长度(年)锁定不可改;速度可改(仅暂停时,setPlaying 接管)
+    spanIn.value = (durationDays / YEAR_D).toFixed(3).replace(/\.?0+$/, "");
+    spanIn.disabled = true;
+    speedIn.value = speed ?? speedIn.value;
+    speedIn.disabled = false;
     const labels = [];
     for (let i = 0; i <= 5; i++) labels.push(fmtTick((totalDays * i) / 5));
     renderTicks(labels);
@@ -80,6 +88,11 @@ export function initTimeline(callbacks) {
   playBtn.addEventListener("click", () => {
     if (mode === "evolve") callbacks.onEvolveToggle?.();
   });
+  speedIn.addEventListener("change", () => {
+    if (mode === "evolve" && !speedIn.disabled) {
+      callbacks.onEvolveSpeed?.(parseFloat(speedIn.value));
+    }
+  });
 
   setIdle();
 
@@ -87,7 +100,10 @@ export function initTimeline(callbacks) {
     setIdle,
     setEvolve,
     setProgress(p) { slider.value = Math.max(0, Math.min(1, p)) * 1000; },
-    setPlaying(on) { playBtn.textContent = on ? "❚❚" : "▶"; },
+    setPlaying(on) {
+      playBtn.textContent = on ? "❚❚" : "▶";
+      speedIn.disabled = on;               // 速度仅暂停时可改
+    },
     setClock(days) { clock.textContent = fmtFromOrigin(days); },
     get spanDays() { return (parseFloat(spanIn.value) || 10) * YEAR_D; },
   };

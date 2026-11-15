@@ -57,6 +57,10 @@ async function boot() {
   // pause/resume.
   const timeline = initTimeline({
     onEvolveToggle: () => { toggleEvolutionPause(); },
+    onEvolveSpeed: async (v) => {
+      try { await api.evolveSpeed(v); }
+      catch (e) { alert(e.message); }
+    },
   });
 
   scene = new OrbitScene($("#gl"), system, {
@@ -146,6 +150,7 @@ async function boot() {
     lastFrameT = now || performance.now();
     if (evolving && evoSpeedDps > 0) renderDays += evoSpeedDps * dt;
     scene.update(renderDays);
+    scene.sampleTrails(renderDays);       // smoke scrolls between anchors
     scene.render();
     requestAnimationFrame(frame);
   })(performance.now());
@@ -210,9 +215,9 @@ async function boot() {
     evoSpeedDps = st.speed ?? 0;          // until the estimator takes over
     lastSnapWall = 0;
     lockWorldUI(true);
-    timeline.setEvolve(st.end_days - st.start_days);
-    timeline.setPlaying(true);
-    setEvolveButton("running");
+    timeline.setEvolve(st.end_days - st.start_days, st.speed);
+    timeline.setPlaying(st.state === "running");
+    setEvolveButton(st.state === "paused" ? "paused" : "running");
     clearInterval(evTimer);
     evTimer = setInterval(tickEvolution, 500);
   }
@@ -243,8 +248,7 @@ async function boot() {
     if (["done", "cancelled", "error"].includes(st.state)) {
       clearInterval(evTimer);
       evolving = false;
-      timeline.setIdle();
-      timeline.setPlaying(false);
+      timeline.setIdle();            // also resets play button + inputs
       setEvolveButton("idle");
       lockWorldUI(false);
       if (st.state === "done") await refreshWorlds();
