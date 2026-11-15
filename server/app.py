@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "server"))
 
-from o2xygen.constants import AU, L_SUN, M_EARTH, M_SUN, R_EARTH_MEAN, R_SUN, gm, G
+from o2xygen.constants import AU, DAY, L_SUN, M_EARTH, M_SUN, R_EARTH_MEAN, R_SUN, gm, G
 from o2xygen.kepler import Elements, elements_to_state
 from o2xygen.system import System, Body, STAR, BODY
 from o2xygen.temperature import equilibrium_temperature
@@ -146,9 +146,12 @@ def get_system():
 
 
 @app.get("/api/state")
-def get_state(t_days: float = 0.0):
-    """Live N-body state at t_days: positions, velocities, masses,
-    luminosities, osculating elements (vs origin), trails."""
+def get_state(t_days: float | None = None):
+    """Live N-body state: positions, velocities, masses, luminosities,
+    osculating elements (vs origin), trails. t_days=None -> current sim
+    time (used by the evolution view, where the job drives the clock)."""
+    if t_days is None:
+        t_days = WS.sim.t_s / DAY
     try:
         return WS.state_at(t_days)
     except IntegrateBudgetExceeded as e:
@@ -372,6 +375,84 @@ def add_body(req: AddBodyReq):
     return {"ok": True, "name": name}
 
 
+# ------------------------------------------------------------- evolution ----
+from evolution import EvolutionJob          # noqa: E402
+
+_EVOLUTION: dict = {"job": None}
+
+
+def _evolution_active() -> bool:
+    j = _EVOLUTION["job"]
+    return j is not None and j.active
+
+
+class EvolveStartReq(BaseModel):
+    duration_days: float                     # how long to evolve (sim days)
+    speed_days_per_s: float                  # sim days per wall second
+
+
+@app.post("/api/evolve/start")
+def evolve_start(req: EvolveStartReq):
+    if _evolution_active():
+        raise HTTPException(409, "已有推演在进行中")
+    if req.duration_days <= 0 or req.speed_days_per_s <= 0:
+        raise HTTPException(400, "推演时长与速度必须为正")
+    job = EvolutionJob(WS, _worlds_dir() / CURRENT_WORLD,
+                       req.duration_days, req.speed_days_per_s)
+    _EVOLUTION["job"] = job
+    job.start()
+    return job.status()
+
+
+def _job_or_404() -> EvolutionJob:
+    j = _EVOLUTION["job"]
+    if j is None or not j.active:
+        raise HTTPException(404, "no active evolution")
+    return j
+
+
+@app.post("/api/evolve/pause")
+def evolve_pause():
+    _job_or_404().pause()
+    return _job_or_404().status()
+
+
+@app.post("/api/evolve/resume")
+def evolve_resume():
+    _job_or_404().resume()
+    return _job_or_404().status()
+
+
+@app.post("/api/evolve/cancel")
+def evolve_cancel():
+    # per spec: only a PAUSED evolution may be cancelled outright
+    j = _job_or_404()
+    if j.state != "paused":
+        raise HTTPException(409, "必须先暂停才能取消推演")
+    j.cancel()
+    return j.status()
+
+
+class EvolveSpeedReq(BaseModel):
+    speed_days_per_s: float
+
+
+@app.post("/api/evolve/speed")
+def evolve_speed(req: EvolveSpeedReq):
+    # per spec: speed may change ONLY while paused
+    j = _job_or_404()
+    if j.state != "paused":
+        raise HTTPException(409, "必须先暂停才能修改推演速度")
+    j.set_speed(req.speed_days_per_s)
+    return j.status()
+
+
+@app.get("/api/evolve/status")
+def evolve_status():
+    j = _EVOLUTION["job"]
+    return j.status() if j is not None else {"state": "idle"}
+
+
 # ------------------------------------------------------------- worlds -------
 @app.get("/api/worlds")
 def list_worlds():
@@ -385,14 +466,20 @@ class WorldReq(BaseModel):
 
 @app.post("/api/world/load")
 def load_world(req: WorldReq):
+    if _evolution_active():
+        raise HTTPException(409, "推演进行中,不能切换世界")
     _rebuild(_load_system(req.name), req.name)
     return {"ok": True, "world": req.name}
 
 
 @app.post("/api/world/save")
 def save_world(req: WorldReq):
+    if _evolution_active():
+        raise HTTPException(409, "推演进行中,不能另存为(推演正在自动覆盖当前存档)")
     name = _check_world_name(req.name) if req.name.strip() else CURRENT_WORLD
-    path = world_mod.save_world(SYSTEM, _worlds_dir() / name)
+    # 另存为 = 备份当前物理状态:pos0/vel0 取实时状态,恒星 age0 相应推进,
+    # 使读回的世界与新 epoch 自洽(与推演自动存档同一语义)
+    path = world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / name)
     return {"ok": True, "world": path.stem}
 
 

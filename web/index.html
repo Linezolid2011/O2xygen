@@ -33,6 +33,7 @@
     </div>
     <div class="topbar-right">
       <span class="saved-hint" id="grid-status"></span>
+      <button class="btn" id="btn-evolve" title="不可逆推演:自动覆盖当前世界存档">⏩ 推演</button>
       <button class="btn accent" id="btn-pipeline">⚡ 一键计算</button>
     </div>
   </header>
@@ -126,6 +127,33 @@
     <div class="modal-foot">
       <button class="btn ghost" id="pipeline-cancel">取消计算</button>
       <span id="pipeline-status"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= evolution modal ======================= -->
+<div class="modal-mask" id="evolve-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-eyebrow">O2XYGEN EVOLUTION</div>
+        <h3>推演 · <span id="evolve-world">—</span></h3>
+      </div>
+      <button class="icon-btn" id="evolve-close">✕</button>
+    </div>
+    <p class="modal-note warn">推演<b>不可逆</b>:进行中的世界存档会被自动覆盖(约每 0.5 秒写盘)。
+    如需保留旧世界,请先用"另存为"备份。</p>
+    <div class="form-grid">
+      <label>推演时长 (年)<input id="evolve-years" type="number" min="0.001" step="any" value="100"></label>
+      <label>速度 (天/秒)<input id="evolve-speed" type="number" min="0.001" max="1000000" step="any" value="30"></label>
+    </div>
+    <div class="progress" style="margin-top:10px"><div class="progress-fill" id="evolve-fill"></div></div>
+    <div class="modal-note" id="evolve-status">尚未开始</div>
+    <div class="modal-foot">
+      <button class="btn accent" id="evolve-start">开始推演</button>
+      <button class="btn" id="evolve-pause" disabled>暂停</button>
+      <button class="btn ghost" id="evolve-cancel" disabled>取消推演</button>
+      <span id="evolve-err" class="err"></span>
     </div>
   </div>
 </div>

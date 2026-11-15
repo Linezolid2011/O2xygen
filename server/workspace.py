@@ -13,7 +13,7 @@ import numpy as np
 
 from o2xygen.constants import DAY, M_SUN
 from o2xygen.nbody import NBodySimulation, IntegrateBudgetExceeded, MAX_INTEGRATE_STEPS
-from o2xygen.system import System
+from o2xygen.system import System, Body, STAR
 
 EVOLVE_CADENCE_S = 1.0 * 365.25 * DAY   # stellar evolution update cadence
 SECONDS_PER_YEAR = 365.25 * DAY
@@ -214,6 +214,26 @@ class Workspace:
             stride = max(1, len(p) // 90)
             out[n] = {"window_days": windows[n] / DAY,
                       "points": p[::stride] if len(p) > 90 else p}
+        return out
+
+    # -------------------------------------------------------------- saving
+    def snapshot_for_save(self) -> System:
+        """A System whose initial conditions ARE the current live state:
+        pos0/vel0 = live state, stellar age0 advanced by elapsed sim-years.
+        Saving THIS makes a reloaded world reproduce the same physical
+        system at its new epoch (推演 autosaves and 另存为 both use it)."""
+        from o2xygen.constants import YEAR as _YEAR
+        states = self.sim.live_state()
+        out = System(self.system.name, origin=self.system.origin)
+        age_shift_gyr = self.sim.t_s / _YEAR / 1e9        # YEARS -> GYRS
+        for n, b in self.system.bodies.items():
+            extra = dict(b.extra)
+            if b.kind == STAR:
+                extra["age0_gyr"] = float(b.extra.get("age0_gyr", 1.0)) + age_shift_gyr
+            out.add(Body(n, b.kind, mass_kg=b.mass_kg,
+                         pos0=states[n][0].copy(), vel0=states[n][1].copy(),
+                         radius_m=b.radius_m, albedo=b.albedo,
+                         rotation_period_s=b.rotation_period_s, extra=extra))
         return out
 
     def flux_at(self, body_name: str, t_days: float) -> dict:

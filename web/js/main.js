@@ -64,7 +64,9 @@ async function boot() {
   // ---- live N-body snapshots (ADR-0015): server integrates, client
   // extrapolates p + v·Δt between polls; trails refresh per snapshot.
   let snapReqT = null;
+  let evolving = false;
   async function pollState(force = false) {
+    if (evolving) return;               // the evolution job drives the clock
     const t = timeline.days;
     if (!force && snapReqT !== null && Math.abs(t - snapReqT) < 0.5) return;
     snapReqT = t;
@@ -112,7 +114,121 @@ async function boot() {
     requestAnimationFrame(frame);
   })();
 
-  // warm the MIST grid in the background so star estimates are instant later
+  // ---------------- evolution modal (推演: irreversible, autosaves the world) ----------------
+  const evModal = $("#evolve-modal");
+  const evYears = $("#evolve-years"), evSpeed = $("#evolve-speed");
+  const evStartBtn = $("#evolve-start"), evPauseBtn = $("#evolve-pause"),
+        evCancelBtn = $("#evolve-cancel"), evCloseBtn = $("#evolve-close");
+  const evFill = $("#evolve-fill"), evStatus = $("#evolve-status"), evErr = $("#evolve-err");
+  let evTimer = null;
+
+  $("#btn-evolve").addEventListener("click", async () => {
+    $("#evolve-world").textContent = system.world ?? system.name;
+    evModal.hidden = false;
+    evErr.textContent = "";
+    try {
+      const st = await api.evolveStatus();
+      if (st.state === "running" || st.state === "paused") attachEvolution();
+    } catch { /* server down: modal still opens for the error on start */ }
+  });
+  evCloseBtn.addEventListener("click", () => {
+    if (evolving) return;                       // 推演进行中不可关闭
+    evModal.hidden = true;
+  });
+
+  function lockTimeline(on) {
+    for (const id of ["tl-slider", "btn-play", "speed", "span",
+                      "world-select", "btn-world-save", "btn-pipeline"]) {
+      const el = document.getElementById(id);
+      if (el) el.disabled = on;
+    }
+    // 进度条不可拖动,只显示已推演占比
+    const slider = document.getElementById("tl-slider");
+    if (on) { slider.max = 1000; slider.value = 0; }
+    else { slider.max = timeline.span; slider.value = timeline.days; }
+  }
+
+  evStartBtn.addEventListener("click", async () => {
+    const years = parseFloat(evYears.value), dps = parseFloat(evSpeed.value);
+    if (!(years > 0) || !(dps > 0)) { evErr.textContent = "时长与速度必须为正"; return; }
+    evErr.textContent = "";
+    try {
+      await api.evolveStart(years * 365.25, dps);
+      attachEvolution();
+    } catch (e) { evErr.textContent = e.message; }
+  });
+
+  evPauseBtn.addEventListener("click", async () => {
+    const st = await api.evolveStatus();
+    if (st.state === "running") await api.evolvePause();
+    else if (st.state === "paused") await api.evolveResume();
+    refreshEvolveControls(await api.evolveStatus());
+  });
+  evCancelBtn.addEventListener("click", async () => {
+    try { refreshEvolveControls(await api.evolveCancel()); }
+    catch (e) { evErr.textContent = e.message; }
+  });
+  evSpeed.addEventListener("change", async () => {
+    const st = await api.evolveStatus();
+    if (st.state !== "paused") return;
+    try { await api.evolveSpeed(parseFloat(evSpeed.value)); }
+    catch (e) { evErr.textContent = e.message; }
+  });
+
+  function attachEvolution() {
+    evolving = true;
+    lockTimeline(true);
+    evStartBtn.disabled = true;
+    evYears.disabled = true;                      // 最大推演时长开始后不可修改
+    evCloseBtn.disabled = true;
+    refreshEvolveControls({ state: "running" });
+    clearInterval(evTimer);
+    evTimer = setInterval(tickEvolution, 500);
+  }
+
+  function refreshEvolveControls(st) {
+    const paused = st.state === "paused";
+    evPauseBtn.disabled = !(st.state === "running" || paused);
+    evPauseBtn.textContent = paused ? "继续" : "暂停";
+    evCancelBtn.disabled = !paused;               // 仅暂停后可取消
+    evSpeed.disabled = !paused;                   // 仅暂停后可改速度
+  }
+
+  async function tickEvolution() {
+    let st;
+    try { st = await api.evolveStatus(); }
+    catch { return; }
+    const pct = Math.round((st.progress || 0) * 1000) / 10;
+    evFill.style.width = `${st.progress * 100}%`;
+    document.getElementById("tl-slider").value = (st.progress || 0) * 1000;
+    const days = Math.round(st.done_days - st.start_days);
+    evStatus.textContent = { running: `推演中 ${pct}% (+${days} 天)`,
+                             paused: `已暂停 ${pct}% (+${days} 天)`,
+                             done: `推演完成(已推演 ${days} 天,存档已更新)`,
+                             cancelled: `已取消(保留至上次自动存档,约 0.5 秒内)`,
+                             error: `推演出错:${st.error}` }[st.state] || st.state;
+    refreshEvolveControls(st);
+    // scene follows the job's clock
+    try {
+      const snap = await api.state(null);
+      scene.setSnapshot(snap);
+      scene.updateTrails();
+      scene.update(snap.t_days);
+      onTimeChanged();
+    } catch { /* transient */ }
+    if (["done", "cancelled", "error"].includes(st.state)) {
+      clearInterval(evTimer);
+      evolving = false;
+      lockTimeline(false);
+      evStartBtn.disabled = false;
+      evYears.disabled = false;
+      evSpeed.disabled = false;
+      evCloseBtn.disabled = false;
+      if (st.state === "done") await refreshWorlds();
+    }
+  }
+
+
   api.starEnsure().then((s) => {
     const hint = $("#grid-status");
     if (s.ready) hint.textContent = "✓ MIST 网格已就绪";

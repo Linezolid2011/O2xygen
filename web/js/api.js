@@ -27,7 +27,8 @@ async function jget(url) {
 
 export const api = {
   system: () => jget("/api/system"),
-  state: (tDays) => jget(`/api/state?t_days=${tDays}`),
+  state: (tDays) => tDays == null ? jget("/api/state")
+                                  : jget(`/api/state?t_days=${tDays}`),
   body: (name, tDays) => jget(`/api/body/${encodeURIComponent(name)}?t_days=${tDays}`),
   structure: (name, req) => jpost(`/api/body/${encodeURIComponent(name)}/structure`, req),
   temperature: (name, req) => jpost(`/api/body/${encodeURIComponent(name)}/temperature`, req),
@@ -38,4 +39,11 @@ export const api = {
   worlds: () => jget("/api/worlds"),
   worldLoad: (name) => jpost("/api/world/load", { name }),
   worldSave: (name) => jpost("/api/world/save", { name }),
+  evolveStart: (durationDays, speedDps) =>
+    jpost("/api/evolve/start", { duration_days: durationDays, speed_days_per_s: speedDps }),
+  evolvePause: () => jpost("/api/evolve/pause", {}),
+  evolveResume: () => jpost("/api/evolve/resume", {}),
+  evolveCancel: () => jpost("/api/evolve/cancel", {}),
+  evolveSpeed: (speedDps) => jpost("/api/evolve/speed", { speed_days_per_s: speedDps }),
+  evolveStatus: () => jget("/api/evolve/status"),
 };
