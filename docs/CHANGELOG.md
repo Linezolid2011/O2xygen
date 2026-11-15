@@ -7,7 +7,17 @@ O₂xygen 作为独立产品演进。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.1] - 2026-11-15
+
+### 数据分发(用户裁定)
+
+- **MIST 网格随仓库分发**(0.1.1 起):分卷压缩包进 git
+  (`.data/MIST-compact/`,每卷 ≤64 MB,避开 GitHub 单文件 100 MB 限制;
+  原始 txz 各约 107 MB 无法直接入库);首次启动自动拼接分卷、解压到
+  `.data/MIST/`(纯 Python tarfile,Windows 自带 tar 无 xz),解压产物
+  与解析缓存 gitignore,压缩卷保留不删。下载者零配置,不再需要
+  5 KB/s 的国际下载之苦。
+- 新增 test_mist_data.py:分卷/重组往返、按需解压、幂等、缺卷报错。
 
 ### 推演(不可逆演化)
 
@@ -177,6 +187,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - **仓库卫生**:误入版本库的 pytest 临时目录(pytest-of-LEO/)移除并加入
   .gitignore;README 测试计数更新(55 项)。
 
+[0.1.1]: https://github.com/Linezolid2011/O2xygen/tree/0.1.1
 [0.1.0]: https://github.com/Linezolid2011/O2xygen/tree/0.1.0
 [0.0.1]: https://github.com/Linezolid2011/O2xygen/releases/tag/v0.0.1
 [0.0.0]: https://github.com/Linezolid2011/O2xygen/tree/0.0.0

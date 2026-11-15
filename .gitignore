@@ -11,8 +11,8 @@ __pycache__/
 .venv/
 venv/
 
-# ---- 外部数据(不随仓库分发,见 README)----
-data/
+# ---- MIST 数据:分卷压缩包进 git,解压产物与解析缓存不进 ----
+.data/MIST/
 *.txz
 *.pkl
 

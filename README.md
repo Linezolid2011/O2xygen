@@ -1,4 +1,4 @@
-﻿# O₂xygen
+# O₂xygen
 
 世界观构造工作台 —— 面向小说设定的实时恒星系统物理沙盒。
 版本见 `docs/version.txt`(唯一真源,ADR-0003)。
@@ -45,11 +45,12 @@ python -m venv .venv
 
 ## 数据
 
-MIST 网格**不随仓库分发**(约 100 MB/金属度)。放置方式:解压
-`MIST_v1.2_feh_<p0.00|p0.25>_afe_p0.0_vvcrit0.4_EEPS.txz` 到
-`D:\test3\data\mist\feh_p0.00` 与 `feh_p0.25`(路径可在
-`server/app.py::_load_grid` 调整);首次加载后自动生成二进制缓存
-(解析约 22 s → 缓存重载约 1.5 s)。数据缺失时恒星演化自动停用,其余功能不受影响。
+**MIST 恒星网格随仓库分发**(0.1.1 起,用户裁定:下载之苦不转嫁):分卷
+压缩包位于 `.data/MIST-compact/`(每卷 ≤64 MB,避开 GitHub 单文件
+100 MB 限制;原始包约 107 MB × 2)。首次启动时程序自动拼接分卷并解压到
+`.data/MIST/`(纯 Python tarfile,解压产物与解析缓存被 gitignore,
+压缩卷保留不删)。世界存档(`*.oxygen`)仍是用户内容,默认存于
+`D:\test3\data\worlds`(可在 `server/app.py::WORLDS_DIR` 调整),不进仓库。
 
 ## 仓库结构
 

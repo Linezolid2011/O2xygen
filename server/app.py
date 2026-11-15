@@ -45,15 +45,15 @@ _GRID = {"grid": None, "loading": False, "error": None, "n_tracks": 0}
 def _load_grid():
     try:
         import pickle
+        from mist_data import ensure_extracted, grid_dirs
         from o2xygen.stars import MistGrid
-        dirs = {}
-        base = Path(r"D:\test3\data\mist")
-        for tag, feh in (("feh_p0.00", 0.0), ("feh_p0.25", 0.25)):
-            if (base / tag).is_dir():
-                dirs[feh] = base / tag
+        # bundled data lives inside the repo: .data/MIST-compact (chunked
+        # volumes, in git) -> .data/MIST (extracted on first boot, cached)
+        extracted = ensure_extracted(ROOT)
+        dirs = {feh: d for feh, d in grid_dirs(extracted).items() if d.is_dir()}
         if not dirs:
-            raise FileNotFoundError(f"no MIST grids under {base}")
-        cache = base / "mist_grid_cache.pkl"
+            raise FileNotFoundError(f"no MIST grids under {extracted}")
+        cache = extracted / "mist_grid_cache.pkl"
         src_mtime = max(d.stat().st_mtime for d in dirs.values())
         if cache.exists() and cache.stat().st_mtime > src_mtime:
             with open(cache, "rb") as f:
