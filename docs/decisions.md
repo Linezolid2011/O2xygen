@@ -172,3 +172,22 @@
   旧存档由 `scripts/repair_world.py` 一次性修复(补 extra + 置零漂移)。
 - **后果**:外部时钟移动检测器变为纯防御(正常路径不再有触发源);检查点
   归档的粒子数固定,推演中禁止添加天体(409),非推演期添加后归档重置。
+
+---
+
+## ADR-0020 运行期依赖最小化:标准库 HTTP 层,手写数值小件(2026-11-16,用户裁定)
+- **背景**:venv 里 51 个 PyPI 包,其中 FastAPI 全家桶(fastapi/starlette/
+  pydantic/pydantic-core[Rust 轮子]/uvicorn/anyio…约 20 个)只为 16 个简单
+  JSON 端点服务;scipy 只被调用了 2 次(brentq、minimize_scalar);psutil
+  可选;plotly/pyarrow/requests 等从未被 import。
+- **决定**:(a) HTTP 层重写为标准库 `http.server`(ThreadingHTTPServer,
+  HTTP/1.1 keep-alive),API 契约逐字节保持不变(紧凑 JSON 分隔符、
+  {"detail"} 错误体、状态码语义);(b) `src/o2xygen/optimize.py` 手写
+  Brent 求根与黄金分割有界极小化,取代 scipy 的两个调用点;(c) psutil
+  用 ctypes psapi(GetProcessMemoryInfo)取代;(d) 卸载全部未被 import 的包。
+- **否决**:替换 rebound(自研积分器可行但牺牲 IAS15 的精度/可逆性与
+  10–100 倍性能,且 numpy 随 rebound 绑定,收益仅是"零依赖"的名义)。
+- **后果**:运行期 PyPI 依赖 = **numpy + rebound 两个**;开发期 = pytest
+  (+其自身依赖)与 playwright。51 → 12 个包。全部 69 项测试与 Playwright
+  深烟测在精简后环境通过。keep-alive 断开属常态,BaseServer.handle_error
+  不再向 stderr 倾倒 ConnectionAbortedError 堆栈。

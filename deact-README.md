@@ -36,7 +36,7 @@ yyyy-mm-dd From origin。
 - **行星结构**:Zeng+2016 PREM 质量-半径拟合、CMF 推断、Maclaurin 扁率、
   n=1 多方球分层。
 - **温度管线**:三种平衡温度体制 + 反照率,温度表从当前时刻向前采样。
-- **WebUI**:FastAPI + Three.js + uPlot,无构建步骤;平滑烟雾轨迹
+- **WebUI**:标准库 http.server + Three.js + uPlot,无构建步骤;平滑烟雾轨迹
   (密集历史 + 渲染时连续重采样)、相对原点的瞬时根数面板、选中即
   跟随相机、一键计算(结构 → 大气 → 温度表)。
 
@@ -44,9 +44,13 @@ yyyy-mm-dd From origin。
 
 ```bash
 python -m venv .venv
-.venv/Scripts/python -m pip install -e . rebound fastapi uvicorn
+.venv/Scripts/python -m pip install -e . rebound
 .venv/Scripts/python server/app.py        # http://127.0.0.1:8501
 ```
+
+运行期依赖只有 **numpy + rebound** 两个 PyPI 包(ADR-0020):HTTP 层是标准库
+`http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
+测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
 测试(69 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
 
@@ -66,8 +70,8 @@ python -m venv .venv
 ## 仓库结构
 
 ```
-src/o2xygen/   物理内核(纯 Python,可独立使用)
-server/        FastAPI 服务(Workspace = 活积分器 + 恒星演化耦合)
+src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
+server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
 tests/         69 项标定与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)

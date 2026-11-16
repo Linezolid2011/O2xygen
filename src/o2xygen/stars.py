@@ -174,7 +174,7 @@ class MistGrid:
         """Inverse problem: age matching a given (L, Teff) point on the track.
         Used to validate against his displayed star (age itself is not visible
         in the screenshots, so we recover it and check consistency of R)."""
-        from scipy.optimize import minimize_scalar
+        from .optimize import minimize_scalar_bounded
         target = np.array([np.log10(luminosity_lsun), np.log10(teff_k)])
 
         def loss(logage):
@@ -188,6 +188,6 @@ class MistGrid:
                             np.log10(props.teff_k)])
             return float(np.sum((got - target) ** 2))
 
-        res = minimize_scalar(loss, bounds=(np.log10(AGE_MIN), np.log10(AGE_MAX)),
-                              method="bounded", options={"xatol": 1e-4})
-        return 10.0 ** res.x
+        x = minimize_scalar_bounded(loss, np.log10(AGE_MIN), np.log10(AGE_MAX),
+                                    xatol=1e-4)
+        return 10.0 ** x

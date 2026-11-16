@@ -294,6 +294,28 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 世界存档目录改为仓库内 `.data/worlds/`(`O2YGEN_WORLDS_DIR` 可覆盖),
   不再硬编码 `D:\test3\data\worlds`。
 
+## [0.1.4] - 2026-11-16
+
+### 运行期依赖最小化(ADR-0020,用户裁定)
+
+- **移除 FastAPI 全家桶(约 20 个包)**:HTTP 层重写为标准库
+  `http.server`(ThreadingHTTPServer + HTTP/1.1 keep-alive)。API 契约
+  逐字节不变:紧凑 JSON 分隔符、`{"detail"}` 错误体、400/404/409/413/503
+  状态码语义、Greek 天体名的百分号解码、静态站 MIME(ES module 的
+  text/javascript)、`../` 逃逸拦截、请求体 BOM 容忍、keep-alive 断开静默。
+- **移除 scipy**:两处调用(brentq、minimize_scalar)换为
+  `src/o2xygen/optimize.py` 的手写 Brent 求根与黄金分割有界极小化,
+  既有 Maclaurin/恒星年龄测试原样通过。
+- **移除 psutil**:RSS 指标改走 ctypes psapi(GetProcessMemoryInfo,
+  修正 64 位伪句柄的 ctypes 声明);POSIX 回退 resource 模块。
+- **卸载全部未被 import 的包**:plotly、pyarrow、requests、protobuf、
+  PyYAML、watchdog 等;`pip check` 干净。
+- **结果:venv 51 → 12 个包**。运行期 PyPI 依赖仅 **numpy + rebound**;
+  pytest(测试)与 playwright(UI 烟测)仅开发期。
+- 全部 69 项测试与 Playwright 深烟测(启动/恒星估算/温度表/推演
+  开始-暂停-调速-取消回滚)在精简环境复测通过。
+
+[0.1.4]: https://github.com/Linezolid2011/O2xygen/tree/0.1.4
 [0.1.3]: https://github.com/Linezolid2011/O2xygen/tree/0.1.3
 [0.1.2]: https://github.com/Linezolid2011/O2xygen/tree/0.1.2
 [0.1.1]: https://github.com/Linezolid2011/O2xygen/tree/0.1.1

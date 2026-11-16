@@ -5,9 +5,9 @@ Reconstructs his 结构 tab: "密度按扁球体积计算"; "引力为 GM/r^2 �
 慢转近似 / Maclaurin / ToF4 / CMS.
 """
 import numpy as np
-from scipy.optimize import brentq
 
 from .constants import G
+from .optimize import brentq
 
 # ---------------------------------------------------------------- gravity ---
 
