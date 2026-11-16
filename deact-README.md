@@ -18,9 +18,11 @@ yyyy-mm-dd From origin。
 世界被实时积分向前推进,**存档每 0.5 秒自动改写为新 epoch 的初始
 条件**(恒星年龄同步推进)。正确备份逻辑是推演前"另存为"。推演期间
 时间轴显示真实标度与进度(不可拖动),左下角播放键担任暂停/恢复,
-暂停时左上角按钮变为红色"取消";非推演模式时间轴完全惰性(刻度 NaN)。
-前端位置与烟雾轨迹由服务器快照锚定 + 客户端同源传播补帧,低速推演
-同样逐帧平滑(实测 60 fps,头尾单帧步长比 1.5×)。
+暂停时左上角按钮变为红色"取消"(确认后停表并**回滚到上次自动存档**,
+内存与存档永不背离);非推演模式时间轴完全惰性(刻度 NaN)。
+一切查询(含显式时刻)都在检查点恢复副本上求值,任何请求都不会拨动
+活时钟(ADR-0019)。前端位置与烟雾轨迹由服务器快照锚定 + 客户端同源
+传播补帧,低速推演同样逐帧平滑(实测 60 fps,头尾单帧步长比 1.5×)。
 
 ## 功能
 
@@ -46,7 +48,7 @@ python -m venv .venv
 .venv/Scripts/python server/app.py        # http://127.0.0.1:8501
 ```
 
-测试(66 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
+测试(69 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -59,7 +61,7 @@ python -m venv .venv
 100 MB 限制;原始包约 107 MB × 2)。首次启动时程序自动拼接分卷并解压到
 `.data/MIST/`(纯 Python tarfile,解压产物与解析缓存被 gitignore,
 压缩卷保留不删)。世界存档(`*.oxygen`)仍是用户内容,默认存于
-`D:\test3\data\worlds`(可在 `server/app.py::WORLDS_DIR` 调整),不进仓库。
+`.data/worlds/`(环境变量 `O2YGEN_WORLDS_DIR` 可覆盖),不进仓库。
 
 ## 仓库结构
 
@@ -67,10 +69,10 @@ python -m venv .venv
 src/o2xygen/   物理内核(纯 Python,可独立使用)
 server/        FastAPI 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         55 项标定与积分验收测试
+tests/         69 项标定与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
-scripts/       shot.py(截图)/ dbg_scene.py(场景调试)
+scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)
 ```
 
 ## 许可与出处

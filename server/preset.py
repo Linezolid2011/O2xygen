@@ -79,4 +79,26 @@ def build_preset() -> System:
                   "atm": {"gases": [("二氧化碳 CO₂", 91.3), ("氮气 N₂", 8.7)],
                           "tau0": 0.32, "p0_bar": 0.32, "n": 2.0, "S": 0.2,
                           "nabla": 0.0}})
+    zero_barycentric_velocity(sys)
+    return sys
+
+
+def zero_barycentric_velocity(sys: System) -> None:
+    """Subtract the barycentric velocity from every body.
+
+    Placement assigns the full relative velocity to the NEW body, so a raw
+    built world carries nonzero total momentum and drifts linearly forever
+    (the pre-fix 白玫瑰 save had drifted ~93 AU off-origin at ~2.8 km/s).
+    A uniform velocity shift leaves every relative state - and therefore
+    every osculating element - untouched."""
+    p = np.zeros(3)
+    m_tot = 0.0
+    for b in sys.bodies.values():
+        p += b.mass_kg * b.vel0
+        m_tot += b.mass_kg
+    if m_tot <= 0:
+        return
+    v_cm = p / m_tot
+    for b in sys.bodies.values():
+        b.vel0 = b.vel0 - v_cm
     return sys

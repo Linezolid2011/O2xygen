@@ -1,18 +1,23 @@
 """Workspace: the live N-body integration behind the API (ADR-0015).
 
-Holds the System catalog and its NBodySimulation. Every state query
-advances (or rewinds) the integrator to the requested time; stellar
-evolution (MIST) is applied adiabatically at a fixed cadence while
-integrating forward, so star masses/luminosities - and therefore orbits -
-genuinely evolve along the timeline.
+Holds the System catalog and its NBodySimulation. ALL queries are
+non-destructive (ADR-0018): a query for a time other than "now" runs on a
+copy restored from the nearest checkpoint and never moves the live clock.
+The live clock moves only through the evolution job (or advance_to, the
+explicit destructive mutator used by tests/tools). Stellar evolution (MIST)
+is applied adiabatically at a fixed cadence while integrating forward, so
+star masses/luminosities - and therefore orbits - genuinely evolve along
+the timeline.
 """
 from __future__ import annotations
 
+from bisect import bisect_right
 import threading
 import numpy as np
 
-from o2xygen.constants import DAY, M_SUN
-from o2xygen.nbody import NBodySimulation, IntegrateBudgetExceeded, MAX_INTEGRATE_STEPS
+from o2xygen.constants import DAY, G, M_SUN
+from o2xygen.nbody import (NBodySimulation, IntegrateBudgetExceeded,
+                           MAX_INTEGRATE_STEPS, rv_to_elements)
 from o2xygen.system import System, Body, STAR
 
 EVOLVE_CADENCE_S = 1.0 * 365.25 * DAY   # stellar evolution update cadence
@@ -31,6 +36,7 @@ class Workspace:
         # tracks (current mass) before the first query answers. The grid may
         # still be loading at startup -> settle lazily on first contact.
         self._settled = False
+        self._trail_cache = None            # (t_s, min_window_s, result)
         try:
             self._settled = self._apply_evolution_at(0.0)
         except Exception:
@@ -60,6 +66,15 @@ class Workspace:
                            "teff_k": p.teff_k}
         return out
 
+    def _apply_star_props(self, props: dict) -> None:
+        """Write MIST properties onto the catalog bodies (display + save)."""
+        for n, v in props.items():
+            b = self.system.bodies[n]
+            b.luminosity_w = v["luminosity_w"]
+            b.mass_kg = v["mass_kg"]
+            b.radius_m = v["radius_m"]            # star visibly swells near turnoff
+            b.extra["teff_k"] = v["teff_k"]       # and reddens
+
     def _apply_evolution_at(self, t_s: float) -> bool:
         """Apply MIST track masses/luminosities at sim time t_s.
         Returns True if the grid was available (settled)."""
@@ -67,12 +82,7 @@ class Workspace:
         if not props:
             return False
         self.sim.update_masses({n: v["mass_kg"] for n, v in props.items()})
-        for n, v in props.items():
-            b = self.system.bodies[n]
-            b.luminosity_w = v["luminosity_w"]
-            b.mass_kg = v["mass_kg"]
-            b.radius_m = v["radius_m"]            # star visibly swells near turnoff
-            b.extra["teff_k"] = v["teff_k"]       # and reddens
+        self._apply_star_props(props)
         return True
 
     def _evolve_between(self, t_from: float, t_to: float,
@@ -87,10 +97,15 @@ class Workspace:
     def _evolve_sim_between(self, sim, t_from: float, t_to: float,
                             record: bool = False) -> None:
         """Stellar-evolution cadence applied to an ARBITRARY simulation
-        object (the live one, or a restored copy used by non-destructive
-        queries like temperature sampling)."""
+        object (the live NBodySimulation, or a raw rebound copy used by
+        non-destructive queries like temperature sampling). Masses AND the
+        catalog's displayed luminosity/radius/Teff are updated on the live
+        path, so a running evolution visibly ages its stars."""
         if t_to <= t_from:
             return
+        is_live = sim is self.sim
+        particles = sim.sim.particles if is_live else sim.particles
+        idx = self.sim._index                # copies share the live ordering
         span = t_to - t_from
         cad = max(EVOLVE_CADENCE_S, span / 200.0)
         tau = np.ceil(t_from / cad) * cad
@@ -99,11 +114,12 @@ class Workspace:
             self._integrate(sim, t_stop, record)
             props = self._star_props_at(t_stop)
             if props:
-                idx = self.sim._index
-                particles = sim.particles if hasattr(sim, "particles") \
-                    else sim.sim.particles       # raw rebound copy
-                for k, v in props.items():
-                    particles[idx[k]].m = v["mass_kg"]
+                if is_live:
+                    sim.update_masses({k: v["mass_kg"] for k, v in props.items()})
+                    self._apply_star_props(props)
+                else:
+                    for k, v in props.items():
+                        particles[idx[k]].m = v["mass_kg"]
             tau += cad
 
     @staticmethod
@@ -115,19 +131,11 @@ class Workspace:
             sim.integrate(t_s, exact_finish_time=1)
 
     # -------------------------------------------------------------- querying
-    def state_at(self, t_days: float | None, with_trails: bool = True) -> dict:
-        """State snapshot at t_days (positions, velocities, masses,
-        luminosities, osculating elements, trails). t_days=None means
-        CURRENT time, resolved INSIDE the lock - this matters: a poll that
-        reads sim.t before waiting for the lock would otherwise scrub the
-        live clock BACKWARD by up to one evolution chunk per request, which
-        both wasted work and tripped the job's external-move detector
-        (2026-11-15 desync incident)."""
+    def advance_to(self, t_days: float) -> None:
+        """DESTRUCTIVE: move the live clock to t_days (tests/tools only -
+        in production time moves ONLY through the evolution job, ADR-0018)."""
         with self.lock:
-            t_s = self.sim.t_s if t_days is None else float(t_days) * DAY
-            # WHOLE-LEAP budget, checked BEFORE any integration: evolution
-            # cadence stops split a giant leap into per-call-legal chunks,
-            # so per-call checks alone cannot prevent a cumulative hang
+            t_s = float(t_days) * DAY
             need = int(abs(t_s - self.sim.t_s) / self.sim.dt_s) + 1
             if need > MAX_INTEGRATE_STEPS:
                 raise IntegrateBudgetExceeded(
@@ -137,61 +145,116 @@ class Workspace:
             if not self._settled:
                 self._settled = self._apply_evolution_at(self.sim.t_s)
             self._evolve_between(self.sim.t_s, t_s)
-            # polls that lag the job by less than one checkpoint cadence are
-            # not scrubs: integrate without archiving (a burst of backward
-            # checkpoints on every poll was measured: +315 entries in 3 s)
-            record = abs(t_s - self.sim.t_s) > self.sim.checkpoint_every_s
-            self.sim.integrate_to(t_s, record_checkpoints=record)
-            states = self.sim.live_state()
-            ps = self.sim.sim.particles
-            idx = self.sim._index
-            bodies = {}
+            self.sim.integrate_to(t_s)
+            self._trail_cache = None
+
+    def _copy_at(self, t_s: float):
+        """A raw rebound sim at t_s, restored from the nearest checkpoint
+        (never touches the live integrator). Forward legs re-apply the
+        stellar-evolution cadence so masses are right at t_s."""
+        cp = self.sim._cp_times
+        i = max(0, bisect_right(cp, t_s) - 1)
+        need = int(abs(t_s - cp[i]) / self.sim.dt_s) + 1
+        if need > MAX_INTEGRATE_STEPS:
+            raise IntegrateBudgetExceeded(
+                f"query at {(t_s - cp[i])/DAY:.3g} d from the nearest "
+                f"checkpoint needs ~{need} steps > budget "
+                f"{MAX_INTEGRATE_STEPS} (dt={self.sim.dt_s/DAY:.3g} d): "
+                "shrink the span or raise dt")
+        sim = self.sim._restore(self.sim._cp_snaps[i], cp[i])
+        if t_s >= cp[i]:
+            self._evolve_sim_between(sim, cp[i], t_s)
+        else:                                   # before the epoch: plain rewind
+            sim.dt = -abs(self.sim.dt_s)
+            sim.integrate(t_s, exact_finish_time=1)
+        return sim
+
+    def state_at(self, t_days: float | None, with_trails: bool = True) -> dict:
+        """State snapshot at t_days (positions, velocities, masses,
+        luminosities, osculating elements, trails). NON-DESTRUCTIVE
+        (ADR-0018): t_days=None reads the live sim as-is; any other time is
+        answered from a checkpoint-restored copy, so no query - however
+        pathological - can move the shared clock (2026-11-15 desync class)."""
+        with self.lock:
+            if not self._settled:
+                self._settled = self._apply_evolution_at(self.sim.t_s)
+            if t_days is None or abs(float(t_days) * DAY - self.sim.t_s) \
+                    <= 0.5 * self.sim.dt_s:
+                t_s = self.sim.t_s
+                sim = self.sim
+            else:
+                t_s = float(t_days) * DAY
+                sim = self._copy_at(t_s)
+            return self._snapshot_dict(sim, t_s, with_trails)
+
+    def _snapshot_dict(self, sim, t_s: float, with_trails: bool) -> dict:
+        """Serialise a sim object (live NBodySimulation or raw rebound copy)
+        sitting at t_s into the /api/state payload."""
+        live = sim is self.sim
+        ps = sim.sim.particles if live else sim.particles
+        idx = self.sim._index
+        bodies = {}
+        states = {}
+        for name, i in idx.items():
+            r = np.array(ps[i].xyz)
+            v = np.array(ps[i].vxyz)
+            states[name] = (r, v)
+            bodies[name] = {"p": [float(x) for x in r],
+                            "v": [float(x) for x in v],
+                            "m": float(ps[i].m)}
+        origin = self.system.origin
+        oidx = idx.get(origin)
+        elements = {}
+        if oidx is not None:
             for name, i in idx.items():
-                r, v = states[name]
-                bodies[name] = {
-                    "p": [float(x) for x in r],
-                    "v": [float(x) for x in v],
-                    "m": float(ps[i].m),
-                }
-            elements = {}
-            for name in self.system.bodies:
-                if name == self.system.origin:
-                    continue                              # origin has no elements
+                if name == origin:
+                    continue                    # origin has no elements
                 try:
-                    el = self.sim.osculating_elements(name)   # vs origin
+                    el = rv_to_elements(
+                        states[name][0] - states[origin][0],
+                        states[name][1] - states[origin][1],
+                        G * (ps[i].m + ps[oidx].m))
                 except Exception:
                     continue
-                from o2xygen.constants import G
-                mu = G * (ps[idx[name]].m + ps[idx[self.system.origin]].m)
-                T = 2 * np.pi * np.sqrt(el.a_m**3 / mu)
+                T = 2 * np.pi * np.sqrt(el.a_m**3 / (G * (ps[i].m + ps[oidx].m)))
                 elements[name] = {
                     "a_m": float(el.a_m), "e": float(el.e),
                     "inc": float(el.inc), "raan": float(el.raan),
                     "argp": float(el.argp), "nu": float(el.nu),
                     "period_days": float(T / DAY),
                 }
-            return {
-                "t_days": float(t_days),
-                "dt_s": float(self.sim.dt_s),
-                "bodies": bodies,
-                "elements": elements,
-                "stars": {s.name: {"teff_k": float(s.extra.get("teff_k", 5772.0)),
-                                   "radius_m": float(s.radius_m),
-                                   "luminosity_w": float(s.luminosity_w)}
-                          for s in self.system.stars()},
-                "trails": self._trails(states, elements, t_s) if with_trails else {},
-                "luminosity_w": {s.name: float(s.luminosity_w)
-                                 for s in self.system.stars()},
+        # display star props: fresh MIST values at t_s where the grid has
+        # them (covers copies, whose catalog bodies are NOT updated), else
+        # the catalog values the live cadence maintains
+        props = self._star_props_at(t_s)
+        stars = {}
+        for s in self.system.stars():
+            p = props.get(s.name)
+            stars[s.name] = {
+                "teff_k": float(p["teff_k"]) if p else float(s.extra.get("teff_k", 5772.0)),
+                "radius_m": float(p["radius_m"]) if p else float(s.radius_m),
+                "luminosity_w": float(p["luminosity_w"]) if p else float(s.luminosity_w),
             }
+        return {
+            "t_days": float(t_s / DAY),
+            "dt_s": float(self.sim.dt_s),
+            "bodies": bodies,
+            "elements": elements,
+            "stars": stars,
+            "trails": self._trails(sim, states, elements, t_s) if with_trails else {},
+            "luminosity_w": {s.name: stars[s.name]["luminosity_w"]
+                             for s in self.system.stars()},
+        }
 
     # -------------------------------------------------------------- trails
-    def _trails(self, states, elements, t_s: float) -> dict:
+    def _trails(self, sim, states, elements, t_s: float) -> dict:
         """Actual integrated paths over a trailing window (the "smoke").
 
         Per body the window is a fraction of its osculating period, clamped
-        to [20 d, 400 d]. Sampled by ONE backward pass on a restored copy of
-        the live state - the integrator itself is never disturbed. Scrub
-        backwards and the smoke correctly trails into negative time.
+        to [20 d, 400 d]. Sampled by ONE backward pass on a copy - the live
+        integrator is never disturbed. Results are cached: while the clock
+        barely moves (idle polling, paused evolution) the previous paths are
+        served instead of re-integrating ~2000 steps per poll.
         """
         names = list(elements.keys())          # elements already exclude the origin
         if not names:
@@ -203,13 +266,20 @@ class Workspace:
         step = min(windows.values()) / K           # shared sample grid
         t_end = t_s - max(windows.values())
 
-        sim = self.sim._restore(self.sim._snapshot(), t_s)
+        cache = self._trail_cache
+        if cache is not None and abs(t_s - cache[0]) < 0.25 * cache[1] \
+                and set(cache[2]) == set(names):
+            return cache[2]
+
+        if sim is self.sim:
+            sim = self.sim._restore(self.sim._snapshot(), t_s)
         sim.dt = -abs(self.sim.dt_s)
         idx = self.sim._index
 
         # trails are ORIGIN-RELATIVE (render frame, ADR-0016): subtract the
         # origin body's position at every sample, not just the head
         oidx = idx.get(self.system.origin)
+        ps = sim.particles
 
         def rel(i):
             p = np.array(ps[i].xyz)
@@ -217,7 +287,6 @@ class Workspace:
             return [float(x) for x in q]
 
         per_body_n = {n: int(round(windows[n] / step)) + 1 for n in names}
-        ps = sim.particles
         pts = {n: [None] for n in names}          # head filled below
         counts = {n: 1 for n in names}
 
@@ -245,6 +314,7 @@ class Workspace:
             stride = max(1, len(p) // 90)
             out[n] = {"window_days": windows[n] / DAY,
                       "points": p[::stride] if len(p) > 90 else p}
+        self._trail_cache = (t_s, min(windows.values()), out)
         return out
 
     # -------------------------------------------------------------- saving
@@ -252,20 +322,23 @@ class Workspace:
         """A System whose initial conditions ARE the current live state:
         pos0/vel0 = live state, stellar age0 advanced by elapsed sim-years.
         Saving THIS makes a reloaded world reproduce the same physical
-        system at its new epoch (推演 autosaves and 另存为 both use it)."""
+        system at its new epoch (推演 autosaves and 另存为 both use it).
+        Takes the workspace lock: autosaves must never read a half-integrated
+        state while an API query holds the integrator mid-leap."""
         from o2xygen.constants import YEAR as _YEAR
-        states = self.sim.live_state()
-        out = System(self.system.name, origin=self.system.origin)
-        age_shift_gyr = self.sim.t_s / _YEAR / 1e9        # YEARS -> GYRS
-        for n, b in self.system.bodies.items():
-            extra = dict(b.extra)
-            if b.kind == STAR:
-                extra["age0_gyr"] = float(b.extra.get("age0_gyr", 1.0)) + age_shift_gyr
-            out.add(Body(n, b.kind, mass_kg=b.mass_kg,
-                         pos0=states[n][0].copy(), vel0=states[n][1].copy(),
-                         radius_m=b.radius_m, albedo=b.albedo,
-                         rotation_period_s=b.rotation_period_s, extra=extra))
-        return out
+        with self.lock:
+            states = self.sim.live_state()
+            out = System(self.system.name, origin=self.system.origin)
+            age_shift_gyr = self.sim.t_s / _YEAR / 1e9        # YEARS -> GYRS
+            for n, b in self.system.bodies.items():
+                extra = dict(b.extra)
+                if b.kind == STAR:
+                    extra["age0_gyr"] = float(b.extra.get("age0_gyr", 1.0)) + age_shift_gyr
+                out.add(Body(n, b.kind, mass_kg=b.mass_kg,
+                             pos0=states[n][0].copy(), vel0=states[n][1].copy(),
+                             radius_m=b.radius_m, albedo=b.albedo,
+                             rotation_period_s=b.rotation_period_s, extra=extra))
+            return out
 
     def flux_series_forward(self, body_name: str, span_days: float, n: int) -> list:
         """NON-DESTRUCTIVE forward flux sampling for the temperature table.
@@ -305,12 +378,15 @@ class Workspace:
             return rows
 
     def flux_at(self, body_name: str, t_days: float | None) -> dict:
-        """Per-star irradiation at body_name. t_days=None -> current time
-        (resolved inside the lock; see state_at)."""
+        """Per-star irradiation at body_name. t_days=None -> current time.
+        A star's own flux is excluded (self-irradiation is meaningless and
+        divides by zero)."""
         snap = self.state_at(t_days, with_trails=False)
         p = snap["bodies"][body_name]["p"]
         out = {}
         for s in self.system.stars():
+            if s.name == body_name:
+                continue                        # no self-irradiation
             sp = snap["bodies"][s.name]["p"]
             d = float(np.linalg.norm(np.array(p) - np.array(sp)))
             out[s.name] = snap["luminosity_w"][s.name] / (4 * np.pi * d * d)

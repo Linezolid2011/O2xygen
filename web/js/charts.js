@@ -53,7 +53,8 @@ export function tempChart(el, dense, opts = {}) {
     if (follow) {
       // keep the current time inside the visible window
       const win = u.scales.x.max - u.scales.x.min;
-      if (days < u.scales.x.min || days > u.scales.x.max) {
+      if (Number.isFinite(win) &&
+          (days < u.scales.x.min || days > u.scales.x.max)) {
         u.setScale("x", { min: Math.max(0, days - win * 0.1), max: Math.max(0, days - win * 0.1) + win });
       }
     }

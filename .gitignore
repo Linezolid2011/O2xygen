@@ -16,6 +16,9 @@ venv/
 *.txz
 *.pkl
 
+# ---- 世界存档:用户内容,不进仓库 ----
+.data/worlds/
+
 # ---- 运行时/临时 ----
 tmp/
 pytest-of-*/

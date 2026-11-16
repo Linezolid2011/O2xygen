@@ -27,7 +27,7 @@ from preset import build_preset
 
 def test_snapshot_for_save_shifts_epoch():
     ws = Workspace(build_preset(), grid_getter=None)
-    ws.state_at(365.25)                       # advance one year
+    ws.advance_to(365.25)                     # advance one year
     snap = ws.snapshot_for_save()
     states = ws.sim.live_state()
     for n, b in snap.bodies.items():
@@ -118,7 +118,7 @@ def test_flux_series_forward_is_non_destructive():
     overshot end_days -> 'done') while physics kept moving. Temperature
     sampling must run on a restored copy and leave sim.t bit-exact."""
     ws = Workspace(build_preset(), grid_getter=None)
-    ws.state_at(10.0)
+    ws.advance_to(10.0)
     t0 = ws.sim.t_s
     rows = ws.flux_series_forward("Múspellsheimr", 3652.5, 13)
     assert ws.sim.t_s == t0, "temperature sampling moved the live clock!"
@@ -127,6 +127,32 @@ def test_flux_series_forward_is_non_destructive():
     # first sample matches the live illumination at the current time
     live = ws.flux_at("Múspellsheimr", t0 / (3600 * 24))["illumination"]["total"]
     assert rows[0]["flux"] == pytest.approx(live, rel=1e-6)
+
+
+def test_state_at_is_non_destructive():
+    """ADR-0018: NO query may move the live clock - not even state_at with
+    an explicit t_days (it once scrubbed the shared integrator on every
+    poll). Explicit-time queries run on checkpoint-restored copies."""
+    ws = Workspace(build_preset(), grid_getter=None)
+    ws.advance_to(10.0)
+    t0 = ws.sim.t_s
+    snap = ws.state_at(500.0)                  # explicit future time
+    assert ws.sim.t_s == t0, "state_at(t_days) moved the live clock!"
+    assert snap["t_days"] == pytest.approx(500.0)
+    snap_now = ws.state_at(None)               # current time: no 500, no crash
+    assert snap_now["t_days"] == pytest.approx(t0 / DAY)
+    past = ws.state_at(5.0)                    # explicit past time: also safe
+    assert ws.sim.t_s == t0
+    assert past["t_days"] == pytest.approx(5.0)
+
+
+def test_flux_at_excludes_self_irradiation():
+    """Querying a STAR's irradiation must not divide by zero on its own
+    flux (returned Infinity/NaN before the 2026-11-16 audit)."""
+    ws = Workspace(build_preset(), grid_getter=None)
+    got = ws.flux_at("Αστραία", None)
+    assert "Αστραία" not in got["illumination"]
+    assert np.isfinite(got["illumination"]["total"])
 
 
 def test_job_aborts_loudly_on_external_clock_move(tmp_path):
@@ -139,8 +165,8 @@ def test_job_aborts_loudly_on_external_clock_move(tmp_path):
     job.start()
     time.sleep(1.0)
     # external interference: a query mutating the live integrator (+50 d).
-    # NB: state_at acquires ws.lock itself - do NOT wrap it (non-reentrant).
-    ws.state_at(ws.sim.t_s / (3600 * 24) + 50.0)
+    # NB: advance_to acquires ws.lock itself - do NOT wrap it (non-reentrant).
+    ws.advance_to(ws.sim.t_s / (3600 * 24) + 50.0)
     assert job.wait(timeout=30)
     assert job.state == "error"
     assert "moved externally" in job.error

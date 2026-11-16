@@ -137,14 +137,17 @@ async function refreshIrradiation(force = false) {
 
 /* -------- star estimation (MIST) -------- */
 function starEstimateSection(b) {
+  // server schema (ADR-0016): extra.mini_msun is the MIST seed, extra.age0_gyr
+  // the age AT THE WORLD EPOCH - the old keys (mass_kg, extra.age_gyr) fed the
+  // estimator the wind-evolved mass and a hardcoded 1.26 Gyr fallback
   return `
     <div class="sec">
       <div class="sec-title">参数估算 · MIST v1.2 / MESA r7503</div>
       <div class="row-flex" style="margin-bottom:8px">
-        <label class="field grow">初始质量 (M☉)<input id="se-mass" type="number" step="0.01" value="${(b.mass_kg / 1.98847e30).toFixed(3)}"></label>
+        <label class="field grow">初始质量 (M☉)<input id="se-mass" type="number" step="0.01" value="${(b.extra?.mini_msun ?? b.mass_kg / 1.98847e30).toFixed(3)}"></label>
         <label class="field grow">[Fe/H]<input id="se-feh" type="number" step="0.05" value="${b.extra?.feh ?? 0.0}"></label>
       </div>
-      <label class="field">年龄 (Gyr)<input id="se-age" type="number" step="0.1" value="${b.extra?.age_gyr ?? 1.26}"></label>
+      <label class="field">年龄 (Gyr)<input id="se-age" type="number" step="0.1" value="${(b.extra?.age0_gyr ?? 1.26).toFixed(6)}"></label>
       <button class="btn ghost btn-sm" id="se-run">估算演化参数</button>
       <div id="se-result" style="margin-top:8px"></div>
       <div class="note">非旋转、太阳比例元素丰度演化轨道。按等效演化点对初始质量与

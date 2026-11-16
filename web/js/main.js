@@ -32,16 +32,24 @@ async function boot() {
     }
   }
   worldSel.addEventListener("change", async () => {
-    await api.worldLoad(worldSel.value);
-    location.reload();
+    try {
+      await api.worldLoad(worldSel.value);
+      location.reload();
+    } catch (e) {
+      // e.g. 409 while an evolution is running: keep the UI on the real world
+      alert(e.message);
+      worldSel.value = system.world;
+    }
   });
   $("#btn-world-save").addEventListener("click", async () => {
     const name = prompt("另存为世界存档(.oxygen):", system.name);
     if (!name) return;
-    const r = await api.worldSave(name.trim());
-    await refreshWorlds();
-    worldSel.value = r.world;
-    $("#ws-name").textContent = r.world;
+    try {
+      const r = await api.worldSave(name.trim());
+      await refreshWorlds();
+      worldSel.value = r.world;
+      $("#ws-name").textContent = r.world;
+    } catch (e) { alert(e.message); }
   });
   await refreshWorlds();
 
@@ -74,7 +82,6 @@ async function boot() {
   // instead of jumping once per poll - the "0.5 s per frame" stutter.
   let renderDays = 0, evoSpeedDps = 0;
   let clockOffset = 0;            // server-vs-render clock error, bled per frame
-  let lastSnapDays = 0, lastSnapWall = 0;
   let lastEvolveWatchdog = 0;
   async function pollState() {
     try {
@@ -217,9 +224,8 @@ async function boot() {
 
   function beginEvolutionUI(st) {
     evolving = true;
-    evoSpeedDps = st.speed ?? 0;          // until the estimator takes over
+    evoSpeedDps = st.speed ?? 0;
     clockOffset = 0;
-    lastSnapWall = 0;
     lockWorldUI(true);
     timeline.setEvolve(st.end_days - st.start_days, st.speed);
     timeline.setPlaying(st.state === "running");
@@ -259,7 +265,10 @@ async function boot() {
       timeline.setIdle();            // also resets play button + inputs
       setEvolveButton("idle");
       lockWorldUI(false);
-      if (st.state === "done") await refreshWorlds();
+      // the save file was rewritten mid-run: reload so every panel,
+      // catalog entry and star property re-reads the new epoch
+      if (st.state === "done") location.reload();
+      else if (st.state === "error") alert(`推演出错:${st.error || "未知原因"}`);
     }
   }
 

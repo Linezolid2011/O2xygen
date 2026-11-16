@@ -127,6 +127,14 @@ class MistGrid:
             raise ValueError(f"age {10**logage:.3g} yr outside track coverage at [Fe/H]={feh}")
         if len(use_m) == 1:
             return np.array([use_v[k][0] for k in self._FIELDS])
+        # np.interp CLAMPS outside the covered masses - at ages where only a
+        # subset of tracks survives (e.g. 13 Gyr: low masses only) that
+        # silently answers for the wrong star. Refuse instead.
+        if not (use_m[0] <= mini <= use_m[-1]):
+            raise ValueError(
+                f"M_initial={mini:.6g} outside the tracks covering age "
+                f"{10**logage:.3g} yr at [Fe/H]={feh} "
+                f"({use_m[0]:.3g}..{use_m[-1]:.3g} M_sun)")
         # exact at nodes: np.interp returns node values when x hits a node
         return np.array([np.interp(mini, use_m, use_v[k]) for k in self._FIELDS])
 

@@ -277,10 +277,14 @@ class NBodySimulation:
         for name, m in mass_kg.items():
             self.sim.particles[self._index[name]].m = float(m)
         if self.integrator == "whfast":
+            # rebound 5.x: Jacobi coordinates must be refreshed after a mass
+            # change; the field lives on sim.ri_whfast (sim.integrator is a
+            # plain string there, so the old attribute path was a silent
+            # no-op under try/except)
             try:
-                self.sim.integrator.recalculate_coordinates_this_timestep = 1
+                self.sim.ri_whfast.recalculate_coordinates_this_timestep = 1
             except Exception:
-                pass   # field name differs across rebound versions
+                pass   # field layout differs across rebound versions
 
     def osculating_elements(self, body_name: str,
                             ref: str | None = None) -> OsculatingElements:

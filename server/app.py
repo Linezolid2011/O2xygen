@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "server"))
 
+import os
+
 from o2xygen.constants import AU, DAY, L_SUN, M_EARTH, M_SUN, R_EARTH_MEAN, R_SUN, gm, G
 from o2xygen.kepler import Elements, elements_to_state
 from o2xygen.system import System, Body, STAR, BODY
@@ -30,7 +32,9 @@ from o2xygen import world as world_mod
 
 WEB_DIR = ROOT / "web"
 DOCS_DIR = ROOT / "docs"
-WORLDS_DIR = Path(r"D:\test3\data\worlds")
+# worlds are user content, kept with the app's other mutable data under
+# .data/ (gitignored); overridable for tests/deployments
+WORLDS_DIR = Path(os.environ.get("O2YGEN_WORLDS_DIR", ROOT / ".data" / "worlds"))
 
 VERSION = (DOCS_DIR / "version.txt").read_text(encoding="utf-8").strip()
 
@@ -67,6 +71,10 @@ def _load_grid():
     except Exception as e:                       # pragma: no cover
         _GRID["error"] = str(e)
         log.exception("MIST grid load failed")
+    finally:
+        # without this, /api/star/status reported "loading" forever after
+        # the first attempt (success OR failure), and no retry could start
+        _GRID["loading"] = False
 
 
 def _grid_getter():
@@ -87,11 +95,12 @@ def _worlds_dir() -> Path:
 
 def _check_world_name(name: str) -> str:
     """World names become file names — refuse anything that could escape
-    WORLDS_DIR (path separators, drive letters, '.'-only names)."""
+    WORLDS_DIR or corrupt the .oxygen suffix mapping (path separators,
+    drive letters, dots, '.'-only names)."""
     name = (name or "").strip()
     if not name:
         raise HTTPException(400, "empty world name")
-    if name in (".", "..") or "/" in name or "\\" in name or ":" in name:
+    if name in (".", "..") or any(c in name for c in '/\\:.'):
         raise HTTPException(400, f"illegal world name {name!r}")
     return name
 
@@ -148,10 +157,9 @@ def get_system():
 @app.get("/api/state")
 def get_state(t_days: float | None = None):
     """Live N-body state: positions, velocities, masses, luminosities,
-    osculating elements (vs origin), trails. t_days=None -> current sim
-    time (used by the evolution view, where the job drives the clock)."""
-    if t_days is None:
-        t_days = WS.sim.t_s / DAY
+    osculating elements (vs origin), trails. NON-DESTRUCTIVE (ADR-0018):
+    t_days=None -> current sim time; any explicit t_days is answered from a
+    checkpoint-restored copy and never moves the shared clock."""
     try:
         return WS.state_at(t_days)
     except IntegrateBudgetExceeded as e:
@@ -252,14 +260,16 @@ def temperature(name: str, req: TempReq):
     # the live sim moved the shared clock - during an evolution this killed
     # the job (sim.t overshot end_days -> 'done') while physics kept moving,
     # and interleaved with any new evolution. Rows carry absolute sim days.
-    rows_raw = WS.flux_series_forward(name, req.span_days, req.n)
-    rows = [{"d": r["d"], "flux": r["flux"],
-             "T": equilibrium_temperature(r["flux"], albedo=req.albedo,
-                                          regime=req.regime)} for r in rows_raw]
+    # One dense pass serves both the chart and the table (the old code ran
+    # the whole integration twice: n samples + 400 samples).
     dense_raw = WS.flux_series_forward(name, req.span_days, 400)
-    dense = [{"d": r["d"], "flux": r["flux"],
-              "T": equilibrium_temperature(r["flux"], albedo=req.albedo,
-                                           regime=req.regime)} for r in dense_raw]
+    to_row = lambda r: {"d": r["d"], "flux": r["flux"],
+                        "T": equilibrium_temperature(r["flux"], albedo=req.albedo,
+                                                     regime=req.regime)}
+    dense = [to_row(r) for r in dense_raw]
+    n = max(2, min(int(req.n), len(dense_raw)))
+    idx = np.linspace(0, len(dense_raw) - 1, n).round().astype(int)
+    rows = [dense[i] for i in idx]
     return {"rows": rows, "dense": dense, "albedo": req.albedo, "regime": req.regime}
 
 
@@ -285,7 +295,12 @@ def star_estimate(req: StarReq):
             threading.Thread(target=_load_grid, daemon=True).start()
         return JSONResponse({"ready": False, "loading": True},
                             status_code=503)
-    p = _GRID["grid"].evaluate(req.mass_msun, req.feh, req.age_gyr * 1e9)
+    p = None
+    try:
+        p = _GRID["grid"].evaluate(req.mass_msun, req.feh, req.age_gyr * 1e9)
+    except ValueError as e:
+        # out-of-grid mass/feh/age is a client error, not a server crash
+        raise HTTPException(400, str(e))
     return {"ready": True,
             "mass_msun": p.mass_msun,
             "radius_km": p.radius_m / 1000.0,
@@ -344,6 +359,10 @@ class AddBodyReq(BaseModel):
 
 @app.post("/api/add_body")
 def add_body(req: AddBodyReq):
+    if _evolution_active():
+        # adding a particle mid-flight would desync the job's checkpoints
+        # and invalidate its world file (fixed body count per archive)
+        raise HTTPException(409, "推演进行中,不能添加天体")
     name = req.name.strip()
     if not name:
         raise HTTPException(400, "请输入名称")
@@ -373,6 +392,12 @@ def add_body(req: AddBodyReq):
                        vx=vel[0], vy=vel[1], vz=vel[2])
         WS.sim._order.append(name)
         WS.sim._index[name] = len(WS.sim._order) - 1
+        # every archived checkpoint predates this body (wrong particle
+        # count) - the archive must restart from the enlarged system or a
+        # later restore would index past the old snapshots
+        WS.sim._cp_times = [WS.sim.t_s]
+        WS.sim._cp_snaps = [WS.sim._snapshot()]
+        WS._trail_cache = None
     return {"ok": True, "name": name}
 
 
@@ -426,12 +451,17 @@ def evolve_resume():
 
 @app.post("/api/evolve/cancel")
 def evolve_cancel():
-    # per spec: only a PAUSED evolution may be cancelled outright
+    # per spec: only a PAUSED evolution may be cancelled outright; cancelling
+    # ROLLS BACK to the last autosave - the live workspace is rebuilt from
+    # the save file so memory and disk can never diverge
     j = _job_or_404()
     if j.state != "paused":
         raise HTTPException(409, "必须先暂停才能取消推演")
     j.cancel()
-    return j.status()
+    j.wait(timeout=30)
+    status = j.status()
+    _rebuild(_load_system(CURRENT_WORLD), CURRENT_WORLD)
+    return status
 
 
 class EvolveSpeedReq(BaseModel):

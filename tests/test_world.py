@@ -81,3 +81,26 @@ def test_suffix_normalised(tmp_path):
     sys = sample_world()
     path = world_mod.save_world(sys, tmp_path / "noext")
     assert path.name == "noext.oxygen"
+
+
+def test_extra_metadata_round_trips(tmp_path):
+    """Audit finding (2026-11-16): save/load silently dropped every 'extra'
+    key - cmf, ring flags, atmosphere presets, composition notes - so a
+    reloaded world lost its pipeline inputs and visuals."""
+    sys = sample_world()
+    sys.bodies["b1"].extra.update({
+        "ring": True, "cmf": 0.38, "composition_preset": "硅酸盐 + 铁核",
+        "atm": {"gases": [["二氧化碳 CO₂", 91.3], ["氮气 N₂", 8.7]],
+                "tau0": 0.32, "p0_bar": 0.32, "n": 2.0, "S": 0.2, "nabla": 0.0},
+    })
+    sys.bodies["S1"].extra["teff_k"] = 6474.11
+    back = world_mod.load_world(world_mod.save_world(sys, tmp_path / "extras"))
+    b1 = back.bodies["b1"]
+    assert b1.extra["cmf"] == pytest.approx(0.38)
+    assert b1.extra["ring"] is True
+    assert b1.extra["composition_preset"] == "硅酸盐 + 铁核"
+    assert b1.extra["atm"]["gases"][0] == ["二氧化碳 CO₂", 91.3]
+    assert b1.extra["atm"]["tau0"] == pytest.approx(0.32)
+    # star extras survive, but the schema fields stay authoritative
+    assert back.bodies["S1"].extra["teff_k"] == pytest.approx(6474.11)
+    assert back.bodies["S1"].extra["age0_gyr"] == pytest.approx(1.26)

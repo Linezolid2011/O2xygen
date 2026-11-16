@@ -1,14 +1,18 @@
-"""Isolate which scene object fills the viewport by toggling visibility."""
+"""Isolate which scene object fills the viewport by toggling visibility.
+
+Current scene graph (post ADR-0010/0016/0017): body spheres + star glow
+sprites + smoke-trail lines + (optional) reference grid. No starfield, no
+orbit lines - those are gone.
+"""
 import time
 from playwright.sync_api import sync_playwright
 
 VARIANTS = [
     ("all-on", ""),
-    ("no-sprites", "s.traverse(o=>{if(o.isSprite)o.visible=false;})"),
-    ("no-starfield", "w.starfield.visible=false"),
-    ("no-glow-no-starfield", "s.traverse(o=>{if(o.isSprite)o.visible=false;}); w.starfield.visible=false"),
-    ("no-grid", "w.grid.visible=false"),
-    ("basic-only", "s.traverse(o=>{if(o.isSprite||o.isPoints)o.visible=false;}); w.grid.visible=false; w.orbitLines.forEach(l=>l.visible=false)"),
+    ("no-glow", "s.traverse(o=>{if(o.isSprite)o.visible=false;})"),
+    ("no-trails", "Object.values(w.trailByName).forEach(t=>t.line.visible=false)"),
+    ("grid-on", "w.grid.visible=true"),
+    ("bodies-only", "s.traverse(o=>{if(o.isSprite)o.visible=false;}); Object.values(w.trailByName).forEach(t=>t.line.visible=false); w.grid.visible=false"),
 ]
 
 with sync_playwright() as p:
@@ -22,7 +26,7 @@ with sync_playwright() as p:
             const w = window.__scene, s = w.scene;
             s.traverse(o => o.visible = true);
             w.grid.visible = false;
-            w.orbitLines.forEach(l => l.visible = true);
+            Object.values(w.trailByName).forEach(t => t.line.visible = true);
             {js}
             w.render();
         }}""")

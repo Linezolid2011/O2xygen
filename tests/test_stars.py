@@ -11,7 +11,9 @@ star pipeline (grid choice, interpolation, evolution application).
 from pathlib import Path
 import pytest
 
-MIST_DIR = Path(r"D:\test3\data\mist")
+# grids ship with the repo: .data/MIST-compact volumes, extracted on first
+# boot to .data/MIST (see server/mist_data.py); skip if never extracted
+MIST_DIR = Path(__file__).resolve().parents[1] / ".data" / "MIST"
 HAVE_DATA = (MIST_DIR / "feh_p0.00").is_dir()
 
 pytestmark = pytest.mark.skipif(not HAVE_DATA, reason="MIST grids not downloaded yet")

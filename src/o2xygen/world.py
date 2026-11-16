@@ -18,7 +18,10 @@ Schema v1:
      "radius_m": <initial radius>, "feh": ..., "age0_gyr": ...,
      # non-star only:
      "radius_m": ..., "albedo": ...,
-     "rotation_period_s": optional}
+     "rotation_period_s": optional,
+     # both kinds:
+     "extra": {...}}                     # free-form metadata (cmf, ring, atm,
+                                         # composition_preset, teff_k, ...)
   ]
 }
 Time origin: t = 0 by definition; displays convert seconds to a uniform
@@ -35,6 +38,22 @@ from .system import System, Body, STAR, BODY
 
 FORMAT = "o2xygen-world"
 VERSION = 1
+
+
+def _json_safe(x):
+    """Coerce extra payloads to plain JSON types (numpy scalars/arrays would
+    otherwise crash json.dumps at autosave time)."""
+    if isinstance(x, dict):
+        return {str(k): _json_safe(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_json_safe(v) for v in x]
+    if isinstance(x, np.ndarray):
+        return [_json_safe(v) for v in x.tolist()]
+    if isinstance(x, (np.floating, np.integer)):
+        return x.item()
+    if isinstance(x, (str, int, float, bool)) or x is None:
+        return x
+    return str(x)
 
 
 def system_to_dict(system: System) -> dict:
@@ -59,6 +78,11 @@ def system_to_dict(system: System) -> dict:
             d["age0_gyr"] = float(b.extra.get("age0_gyr", 1.0))
         else:
             d["albedo"] = float(b.albedo)
+        if b.extra:
+            # free-form metadata (cmf, ring, atmosphere, placement stamps);
+            # losing these on save once silently wiped a world's pipeline
+            # inputs and ring flags (2026-11-16 audit)
+            d["extra"] = _json_safe(b.extra)
         bodies.append(d)
     return {"format": FORMAT, "version": VERSION, "name": system.name,
             "origin": system.origin, "bodies": bodies}
@@ -83,7 +107,9 @@ def dict_to_system(d: dict) -> System:
         kind = bd["kind"]
         if kind not in (STAR, BODY):
             raise ValueError(f"body {bd['name']!r}: bad kind {kind!r}")
-        extra = {}
+        # free-form metadata first; the authoritative schema fields below
+        # always win over any stale duplicates inside extra
+        extra = dict(bd.get("extra") or {})
         albedo = 0.0
         if kind == STAR:
             extra["feh"] = float(bd.get("feh", 0.0))
