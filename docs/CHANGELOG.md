@@ -309,7 +309,8 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - **移除 psutil**:RSS 指标改走 ctypes psapi(GetProcessMemoryInfo,
   修正 64 位伪句柄的 ctypes 声明);POSIX 回退 resource 模块。
 - **卸载全部未被 import 的包**:plotly、pyarrow、requests、protobuf、
-  PyYAML、watchdog 等;`pip check` 干净。
+  PyYAML、watchdog 等;顺手清掉 site-packages 里的 pycache 残骸
+  (scipy/anyio 等)、补回 pytest 隐式依赖的 `py`;`pip check` 干净。
 - **结果:venv 51 → 12 个包**。运行期 PyPI 依赖仅 **numpy + rebound**;
   pytest(测试)与 playwright(UI 烟测)仅开发期。
 - 全部 69 项测试与 Playwright 深烟测(启动/恒星估算/温度表/推演
