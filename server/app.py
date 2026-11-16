@@ -27,6 +27,7 @@ import json
 import logging
 import mimetypes
 import os
+import socket
 import sys
 import threading
 import time
@@ -566,6 +567,73 @@ def api_world_save(body):
 
 
 # ---------------------------------------------------------------- router ----
+# ------------------------------------------------------------- SSE stream ---
+# Server-driven rendering (ADR-0021): the server is the ONLY computer. The
+# client integrates nothing - it draws what this stream emits.
+#   event: pose    ~60 Hz, only while the sim clock moves (idle = silent)
+#   event: trails  ~5.5 Hz while moving, only when the cached paths changed
+#   comment ": hb" every 5 s, liveness + proxy keep-alive
+# Meta (elements, star props) stays on the classic 800 ms /api/state poll -
+# it was never the problem.
+POSE_INTERVAL_S = 1.0 / 60.0
+TRAIL_INTERVAL_S = 0.18
+HEARTBEAT_S = 5.0
+
+
+def _sse_frame(event: str, payload: dict) -> bytes:
+    return (f"event: {event}\ndata: "
+            + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            + "\n\n").encode("utf-8")
+
+
+def _sse_loop(h: "Handler") -> None:
+    """Emit pose/trail frames until the client goes away. Runs on the
+    connection's own thread (ThreadingHTTPServer). Reads the global WS every
+    tick, so world switches / cancel-rollbacks re-anchor automatically."""
+    last_pose_t = None
+    last_trail_check = 0.0
+    last_trails_obj = None
+    last_hb = time.time()
+    while True:
+        now = time.time()
+        pose = None
+        try:
+            ws = WS
+            t_s = None
+            if ws is not None:
+                with ws.lock:                    # microsecond hold: array copy
+                    t_s = ws.sim.t_s
+                    if t_s != last_pose_t:
+                        ps = ws.sim.sim.particles
+                        pose = {"t_days": t_s / DAY,
+                                "p": {n: [float(ps[i].x), float(ps[i].y), float(ps[i].z)]
+                                      for n, i in ws.sim._index.items()}}
+                if pose is not None:
+                    h.wfile.write(_sse_frame("pose", pose))
+                    last_pose_t = t_s
+                # trails: drive the server-side (cached) backward integration
+                # only while the clock moves; emit only when it recomputed
+                if t_s is not None and now - last_trail_check >= TRAIL_INTERVAL_S:
+                    last_trail_check = now
+                    snap = ws.state_at(None)
+                    trails = snap.get("trails")
+                    if trails is not None and trails is not last_trails_obj:
+                        h.wfile.write(_sse_frame("trails", {"t_days": snap["t_days"],
+                                                            "trails": trails}))
+                        last_trails_obj = trails
+            if now - last_hb >= HEARTBEAT_S:
+                h.wfile.write(b": hb\n\n")
+                last_hb = now
+            h.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError,
+                OSError):
+            return                                # client went away
+        except Exception:
+            log.error("SSE emitter error\n%s", traceback.format_exc())
+            return
+        time.sleep(POSE_INTERVAL_S)
+
+
 def route_api(method: str, segs: list[str], query: dict, body: dict):
     """Dispatch one /api request -> (payload, status). Raises HttpError."""
     tail = segs[1:]                                   # after "api"
@@ -684,10 +752,28 @@ class Handler(BaseHTTPRequestHandler):
             ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self._send_bytes(target.read_bytes(), 200, ctype)
 
+    def _serve_sse(self):
+        """GET /api/stream: server-sent events, the render pipeline
+        (ADR-0021). No Content-Length: the body is 'until disconnect'."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")     # defeat proxy buffering
+        self.end_headers()
+        self.close_connection = True
+        try:
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+        _sse_loop(self)
+
     def _dispatch(self, method: str):
         try:
             u = urlsplit(self.path)
             path = unquote(u.path)
+            if method == "GET" and path == "/api/stream":
+                self._serve_sse()                   # never returns normally
+                return
             if path.startswith("/api/"):
                 segs = [s for s in path.split("/") if s != ""]
                 query = parse_qs(u.query)

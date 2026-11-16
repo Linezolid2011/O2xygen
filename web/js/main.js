@@ -53,11 +53,18 @@ async function boot() {
   });
   await refreshWorlds();
 
+  // ---- server-driven rendering (ADR-0021) ----
+  // The server is the ONLY computer. An SSE stream pushes authoritative
+  // poses (~60 Hz while the clock moves) and server-integrated trails; the
+  // client integrates nothing, extrapolates nothing, and has no render clock
+  // of its own - currentDays IS the server's sim time. The 800 ms poll
+  // remains for meta (star display props) and as the degraded fallback if
+  // the stream dies.
   let selected = null;
-
   let scene = null;             // set below; timeline callbacks fire later
-  let currentDays = 0;          // latest server sim time (snapshot)
+  let currentDays = 0;          // latest server sim time (authoritative)
   let evolving = false;
+  let streamLive = false;
 
   // Time ONLY moves via 推演 (user spec 2026-11-15): in idle mode the
   // timeline is inert (NaN ticks, dead play button); during evolution the
@@ -76,18 +83,24 @@ async function boot() {
   });
   window.__scene = scene;      // debug/test hook
 
-  // ---- live N-body snapshots (ADR-0015) at the CURRENT sim time. A
-  // render clock advances with wall time at the evolution speed between
-  // snapshots (server snapshots resync it), so slow evolution is SMOOTH
-  // instead of jumping once per poll - the "0.5 s per frame" stutter.
-  let renderDays = 0, evoSpeedDps = 0;
-  let clockOffset = 0;            // server-vs-render clock error, bled per frame
+  const es = new EventSource("/api/stream");
+  window.__stream = es;        // debug/test hook
+  es.addEventListener("pose", (e) => {
+    const m = JSON.parse(e.data);
+    streamLive = true;
+    currentDays = m.t_days;
+    scene.setPose(m.p, m.t_days);
+  });
+  es.addEventListener("trails", (e) => {
+    scene.updateTrails(JSON.parse(e.data));
+  });
+  es.onerror = () => { streamLive = false; };   // poll fallback covers meta
+
+  // ---- meta poll (800 ms): star display props, fallback pose/trails, and
+  // the evolution watchdog (a job started elsewhere must attach this UI) ----
   let lastEvolveWatchdog = 0;
   async function pollState() {
     try {
-      // watchdog: a job started elsewhere (other tab / page refresh mid-
-      // evolution) must attach this UI to it, or rendering falls back to
-      // one jump per poll
       if (!evolving && performance.now() - lastEvolveWatchdog > 3000) {
         lastEvolveWatchdog = performance.now();
         try {
@@ -96,23 +109,13 @@ async function boot() {
         } catch { /* status probe is best-effort */ }
       }
       const snap = await api.state(null);
-      currentDays = snap.t_days;
-      if (evolving) {
-        // the server's average advance rate IS the configured speed (chunks
-        // owe speed*0.4d each and run back to back); an EMA of observed
-        // snap deltas oscillated under bursty responses - configured speed
-        // plus offset bleeding is stable. Never apply corrections in one
-        // shot: the frame loop bleeds clockOffset smoothly.
-        clockOffset = snap.t_days - renderDays;
+      if (!streamLive) {
+        currentDays = snap.t_days;          // degraded mode: poll owns data
+        scene.setSnapshot(snap);            //   (sets fallback pose too)
+        scene.updateTrails(snap);
       } else {
-        renderDays = snap.t_days;
-        clockOffset = 0;
-        evoSpeedDps = 0;
+        scene.setSnapshot(snap);            // meta only: stars/radius/Teff
       }
-      timeline.setClock(currentDays);
-      scene.setSnapshot(snap);
-      scene.updateTrails();
-      onTimeChanged();          // irradiation/chart marker follow the clock
     } catch { /* transient server busy: keep last snapshot */ }
   }
   await pollState();
@@ -145,27 +148,19 @@ async function boot() {
   $("#btn-focus").addEventListener("click", () => scene.focusSelected());
   $("#btn-grid").addEventListener("click", () => scene.toggleGrid());
 
-  // render loop: the render clock advances every frame during evolution
-  let lastFrameT = performance.now();
-  (function frame(now) {
-    const dt = Math.min(((now || performance.now()) - lastFrameT) / 1000, 0.25);
-    lastFrameT = now || performance.now();
-    // per-frame correction cap: invisible relative to the frame's own
-    // motion at ANY speed (>=0.35 d floor for slow speeds), yet a large
-    // offset still drains in ~a second of frames
-    const cap = Math.max(0.35, evoSpeedDps * dt * 3);
-    const bleed = Math.sign(clockOffset) * Math.min(Math.abs(clockOffset) * 0.08, cap);
-    if (evolving && evoSpeedDps > 0) {
-      renderDays += evoSpeedDps * dt + bleed;
-    } else if (clockOffset) {
-      renderDays += bleed;
-    }
-    clockOffset *= 0.92;
-    scene.update(renderDays);
-    scene.sampleTrails(renderDays, evolving && evoSpeedDps > 0);
+  // render loop: draw exactly what the server sent - no clock, no physics.
+  // A 250 ms ticker drives the clock label and time-followed panels (their
+  // own throttles apply), instead of touching the DOM at pose rate.
+  setInterval(() => {
+    timeline.setClock(currentDays);
+    onTimeChanged();
+  }, 250);
+  (function frame() {
+    scene.update(currentDays);
+    scene.drawTrails();
     scene.render();
     requestAnimationFrame(frame);
-  })(performance.now());
+  })();
 
   // ---------------- evolution (推演: irreversible, autosaves the world) ----------------
   // Control flow (user spec 2026-11-15):
@@ -224,8 +219,6 @@ async function boot() {
 
   function beginEvolutionUI(st) {
     evolving = true;
-    evoSpeedDps = st.speed ?? 0;
-    clockOffset = 0;
     lockWorldUI(true);
     timeline.setEvolve(st.end_days - st.start_days, st.speed);
     timeline.setPlaying(st.state === "running");
@@ -251,13 +244,6 @@ async function boot() {
     let st;
     try { st = await api.evolveStatus(); } catch { return; }
     timeline.setProgress(st.progress || 0);
-    if (st.state === "running") {
-      evoSpeedDps = st.speed;
-    } else {
-      evoSpeedDps = 0;                      // freeze exactly
-      renderDays = st.done_days;
-      clockOffset = 0;
-    }
     applyEvolutionState(st);
     if (["done", "cancelled", "error"].includes(st.state)) {
       clearInterval(evTimer);

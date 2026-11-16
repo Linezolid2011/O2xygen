@@ -316,6 +316,25 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 全部 69 项测试与 Playwright 深烟测(启动/恒星估算/温度表/推演
   开始-暂停-调速-取消回滚)在精简环境复测通过。
 
+## [0.1.5] - 2026-11-16
+
+### 服务器驱动渲染(ADR-0021,用户裁定):客户端零物理
+
+- **新增 `GET /api/stream`(SSE,标准库手写)**:`pose` 事件(时钟变化即推,
+  ~60 Hz,含服务器仿真时刻与全天体坐标)、`trails` 事件(~5.5 Hz,服务器
+  回扫积分的烟雾路径,缓存未变不发)、5 秒心跳;TCP_NODELAY、断线即清场、
+  世界切换/取消回滚自动重锚。800 ms 轮询保留作 meta 与降级通道。
+- **删除客户端全部物理与双时钟**:NBodyPropagator(velocity-Verlet)、
+  renderDays/clockOffset/bleed/EMA 纠偏、烟雾客户端历史重采样机器
+  (trailHist/sampleTrails/reseed 防跳)——约 300 行全项目历史上 bug 密度
+  最高的代码。渲染循环只画服务器最新位姿;烟雾头部顶点钉在最新位姿上
+  (纯几何拼接)。kepler.js 退役为纯常量模块。
+- 暂停 = 服务器停推(逐帧精确);取消/回滚后推流自动切到新 Workspace。
+- 实测:2000 d/s 推演 72 s 流 ~178 KB/s、服务器 RSS 恒定(66.6 MB)、
+  pose ~50–60 Hz、trails ~4–6 Hz;Playwright 全流程烟测(启动/推演/
+  暂停冻结/取消回滚)零页面错误、零 HTTP≥400。
+
+[0.1.5]: https://github.com/Linezolid2011/O2xygen/tree/0.1.5
 [0.1.4]: https://github.com/Linezolid2011/O2xygen/tree/0.1.4
 [0.1.3]: https://github.com/Linezolid2011/O2xygen/tree/0.1.3
 [0.1.2]: https://github.com/Linezolid2011/O2xygen/tree/0.1.2
