@@ -161,10 +161,13 @@ export class OrbitScene {
   }
 
   buildTrails() {
-    /** Smoke trails: actual integrated paths from the server (ADR-0015),
-     *  extended client-side between snapshots (sampleTrails). */
+    /** Smoke trails: server snapshots seed a dense per-frame history
+     *  (trailHist); rendering resamples 91 uniform sim-times across the
+     *  window with linear interpolation, so BOTH the head (body) and the
+     *  tail glide continuously instead of hopping in stride-sized steps. */
     this.trailByName = {};
-    this.trailBuf = {};
+    this.trailHist = {};
+    this.trailWindow = {};
     for (const b of this.system.bodies) {
       if (b.name === this.system.origin) continue;      // origin defines the frame
       const geo = new THREE.BufferGeometry();
@@ -232,36 +235,111 @@ export class OrbitScene {
     return geo;
   }
 
-  /** Anchor the smoke to the server's integrated paths (per snapshot). */
+  /** Anchor the smoke to the server's integrated paths (per snapshot):
+   *  seeds the dense history with the exact server points at known times. */
   updateTrails(snap = this.snap) {
     if (!snap?.trails) return;
     for (const [name, t] of Object.entries(this.trailByName)) {
       const data = snap.trails[name];
-      if (!data || data.points.length < 2) { t.line.visible = false; this.trailBuf[name] = null; continue; }
+      if (!data || data.points.length < 2) {
+        t.line.visible = false;
+        this.trailHist[name] = [];
+        continue;
+      }
       t.line.visible = true;
-      const pts = data.points.slice().reverse();       // server newest-first -> oldest-first
-      const stride = data.window_days / 90;
-      this.trailBuf[name] = { pts, stride, nextAt: snap.t_days + stride };
+      const existing = this.trailHist[name];
+      const anchorStride = data.window_days / (data.points.length - 1);
+      if (existing && existing.length > 2 &&
+          existing[existing.length - 1][0] >= snap.t_days - anchorStride) {
+        // our client history already reaches into the anchor's newest
+        // stride: reseeding would swap the window mid-stream and show as
+        // a one-frame tail jump (measured: a reseed every poll -> a jump
+        // every ~800 ms). Keep the continuous client history; only a
+        // genuine client lag (> one stride behind) reseeds.
+        this.trailWindow[name] = data.window_days;
+        continue;
+      }
+      const n = data.points.length;
+      const stride = data.window_days / (n - 1);
+      const pts = data.points.slice().reverse();       // oldest -> newest
+      const hist = [];
+      for (let i = 0; i < n; i++) {
+        hist.push([snap.t_days - (n - 1 - i) * stride,
+                   pts[i][0], pts[i][1], pts[i][2]]);
+      }
+      this.trailHist[name] = hist;
+      this.trailWindow[name] = data.window_days;
       t.line.geometry.dispose();
       t.line.geometry = this._trailGeometry(pts, t.baseColor);
+      t.posArr = null;                   // invalidate: sampleTrails owns buffers
     }
   }
 
-  /** Client-side smoke continuation: sample the render clock into the ring
-   *  buffer every frame so the smoke scrolls smoothly between server
-   *  anchors (same philosophy as the position render clock). */
-  sampleTrails(renderDays) {
+  _sampleHist(hist, tt) {
+    const first = hist[0], last = hist[hist.length - 1];
+    if (tt <= first[0]) return [first[1], first[2], first[3]];
+    if (tt >= last[0]) return [last[1], last[2], last[3]];
+    for (let i = hist.length - 2; i >= 0; i--) {       // tt is usually recent
+      if (hist[i][0] <= tt) {
+        const a = hist[i], b = hist[i + 1];
+        const f = (tt - a[0]) / Math.max(1e-12, b[0] - a[0]);
+        return [a[1] + (b[1] - a[1]) * f,
+                a[2] + (b[2] - a[2]) * f,
+                a[3] + (b[3] - a[3]) * f];
+      }
+    }
+    return [first[1], first[2], first[3]];
+  }
+
+  /** Per-frame smoke update: append the current render-clock sample to the
+   *  history (while evolving), then rebuild the visible polyline by
+   *  CONTINUOUS resampling - the tail slides out smoothly instead of
+   *  hopping one stride per buffer shift. */
+  sampleTrails(renderDays, active) {
     if (!this.propagator || !this.system.origin) return;
     const o = this.propagator.pos(this.system.origin);
     for (const [name, t] of Object.entries(this.trailByName)) {
-      const buf = this.trailBuf?.[name];
-      if (!buf || renderDays < buf.nextAt) continue;
-      const p = this.propagator.pos(name);
-      buf.pts.push([p.x - o.x, p.y - o.y, p.z - o.z]);
-      if (buf.pts.length > 91) buf.pts.shift();
-      buf.nextAt += buf.stride;
-      t.line.geometry.dispose();
-      t.line.geometry = this._trailGeometry(buf.pts, t.baseColor);
+      const hist = this.trailHist?.[name];
+      const windowDays = this.trailWindow?.[name];
+      if (!hist || !windowDays) continue;
+      if (active) {
+        // append at ~stride density (window/90) - the continuous TIME-
+        // uniform resample below supplies the smoothness, so the history
+        // only needs to be dense enough to interpolate (a per-frame append
+        // made _sampleHist O(N) x 91 per body per frame = slideshow)
+        const stride = windowDays / 90;
+        const last = hist[hist.length - 1];
+        if (!last || renderDays >= last[0] + stride) {
+          const p = this.propagator.pos(name);
+          hist.push([renderDays, p.x - o.x, p.y - o.y, p.z - o.z]);
+          const cutoff = renderDays - windowDays - stride;
+          while (hist.length > 2 && hist[0][0] < cutoff) hist.shift();
+          if (hist.length > 400) hist.splice(0, hist.length - 400);
+        }
+      }
+      if (!active) continue;               // paused/idle: keep last geometry
+      if (hist.length < 2) continue;
+      // reuse buffers: colours are index-static (fade), only positions move
+      const n = 91;
+      if (!t.posArr || t.posArr.length !== n * 3) {
+        const geo = this._trailGeometry(new Array(n).fill([0, 0, 0]), t.baseColor);
+        t.line.geometry.dispose();
+        t.line.geometry = geo;
+        t.posArr = geo.attributes.position.array;
+      }
+      for (let j = 0; j < n; j++) {
+        const tt = renderDays - windowDays * (1 - j / (n - 1));
+        const pt = this._sampleHist(hist, tt);
+        t.posArr[j * 3] = pt[0]; t.posArr[j * 3 + 1] = pt[1]; t.posArr[j * 3 + 2] = pt[2];
+      }
+      // pin the head to the body: history appends are stride-gated, so the
+      // freshest stored point lags; the body itself is drawn from the
+      // propagator and the smoke must attach to it exactly
+      const hp = this.propagator.pos(name);
+      t.posArr[(n - 1) * 3] = hp.x - o.x;
+      t.posArr[(n - 1) * 3 + 1] = hp.y - o.y;
+      t.posArr[(n - 1) * 3 + 2] = hp.z - o.z;
+      t.line.geometry.attributes.position.needsUpdate = true;
     }
   }
 

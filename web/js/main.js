@@ -143,14 +143,19 @@ async function boot() {
   (function frame(now) {
     const dt = Math.min(((now || performance.now()) - lastFrameT) / 1000, 0.25);
     lastFrameT = now || performance.now();
+    // per-frame correction cap: invisible relative to the frame's own
+    // motion at ANY speed (>=0.35 d floor for slow speeds), yet a large
+    // offset still drains in ~a second of frames
+    const cap = Math.max(0.35, evoSpeedDps * dt * 3);
+    const bleed = Math.sign(clockOffset) * Math.min(Math.abs(clockOffset) * 0.08, cap);
     if (evolving && evoSpeedDps > 0) {
-      renderDays += evoSpeedDps * dt + clockOffset * 0.08;
+      renderDays += evoSpeedDps * dt + bleed;
     } else if (clockOffset) {
-      renderDays += clockOffset * 0.08;
+      renderDays += bleed;
     }
     clockOffset *= 0.92;
     scene.update(renderDays);
-    scene.sampleTrails(renderDays);       // smoke scrolls between anchors
+    scene.sampleTrails(renderDays, evolving && evoSpeedDps > 0);
     scene.render();
     requestAnimationFrame(frame);
   })(performance.now());

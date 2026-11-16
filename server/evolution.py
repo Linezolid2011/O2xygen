@@ -105,10 +105,15 @@ class EvolutionJob:
         ws = self.ws
         chunk_days = CHUNK_STEP_BUDGET * ws.sim.dt_s / DAY
         next_save = time.time() + AUTOSAVE_INTERVAL_S
+        last_wall = time.time()
+        self._debt_days = 0.0
         try:
             while True:
                 with self._ctl:
                     st = self.state
+                now = time.time()
+                wall_dt = now - last_wall
+                last_wall = now
                 if st == "cancelled":
                     break
                 if st == "paused":
@@ -117,22 +122,23 @@ class EvolutionJob:
                 sim_now = ws.sim.t_s / DAY
                 if sim_now >= self.end_days:
                     break
-                # chunk by STEP BUDGET (bounded lock hold), not by wall wish;
-                # irreversible evolution never records checkpoints - the save
-                # has moved on, scrubbing back into it is meaningless
-                owe_days = min(self.speed * WALL_CHUNK_S,
-                               chunk_days,
+                # DEBT-BASED pacing: accrue sim-time debt at exactly the
+                # configured speed per REAL wall second, then integrate what
+                # is owed (bounded by the step budget per lock hold). The
+                # old fixed-0.4s-cycle design ran at owe/work_time, which
+                # measured HALF the configured speed once autosaves started
+                # costing real wall time - a guaranteed client/server rate
+                # mismatch.
+                self._debt_days += self.speed * wall_dt
+                owe_days = min(self._debt_days, chunk_days,
                                self.end_days - sim_now)
-                t0 = time.time()
+                if owe_days <= 1e-9:
+                    time.sleep(0.01)
+                    continue
                 with ws.lock:
                     # external-clock-move detector: another caller holding
                     # the lock between our chunks can advance or rewind the
-                    # shared integrator. Continuing would corrupt the
-                    # autosave. Abort LOUDLY, skip the final save.
-                    # INCIDENT 2026-11-15: a temperature query advanced the
-                    # live clock +10 yr per call - the job saw 'done',
-                    # the client went idle, physics kept moving, and the
-                    # next evolution interleaved with the rogue motion.
+                    # shared integrator. Abort LOUDLY, skip the final save.
                     actual_days = ws.sim.t_s / DAY
                     drift = actual_days - self._expected_days
                     if abs(drift) > max(1.0, owe_days):
@@ -145,13 +151,11 @@ class EvolutionJob:
                     ws._evolve_between(t_from, t_to, record=False)
                     ws.sim.integrate_to(t_to, record_checkpoints=False)
                     self._expected_days = t_to / DAY
+                    self._debt_days -= owe_days
                 self.done_days = ws.sim.t_s / DAY
                 if time.time() >= next_save:
                     self._autosave()
                     next_save = time.time() + AUTOSAVE_INTERVAL_S
-                elapsed = time.time() - t0
-                if elapsed < WALL_CHUNK_S:
-                    time.sleep(WALL_CHUNK_S - elapsed)
             with self._ctl:
                 if self.state == "running":
                     self._autosave()          # final save on completion
