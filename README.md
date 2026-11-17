@@ -56,7 +56,7 @@ python -m venv .venv
 `http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
 测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
-测试(72 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
+测试(73 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -77,7 +77,7 @@ python -m venv .venv
 src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
 server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         72 项标定与积分验收测试
+tests/         73 项标定与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)

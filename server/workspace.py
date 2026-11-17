@@ -565,6 +565,10 @@ class Workspace:
         when a new evolution was started - the 'terrible thing'.
 
         Returns rows of absolute sim days + total flux [W/m^2]."""
+        # The integration runs on a private copy, so the workspace lock is
+        # needed ONLY to take a consistent snapshot. Holding it for the whole
+        # 400-sample integration starved poses/evolution for seconds whenever
+        # the user switched between non-star bodies (2026-11-17 report).
         with self.lock:
             t0 = self.sim.t_s
             sim = self.sim._restore(self.sim._snapshot(), t0)
@@ -573,24 +577,24 @@ class Workspace:
             star_names = [s.name for s in self.system.stars()]
             # fallback luminosities when the MIST grid is unavailable
             base_lum = {s.name: s.luminosity_w for s in self.system.stars()}
-            rows = []
-            prev = t0
-            for i in range(n):
-                t = t0 + span_days * DAY * i / max(n - 1, 1)
-                self._evolve_sim_between(sim, prev, t, spins=spins)
-                sim.integrate(t, exact_finish_time=1)   # raw copy: no archive
-                prev = t
-                ps = sim.particles
-                p = np.array(ps[idx[body_name]].xyz)
-                props = self._star_props_at(t)
-                lum = {k: v["luminosity_w"] for k, v in props.items()} or base_lum
-                flux = 0.0
-                for sname in star_names:
-                    sp = np.array(ps[idx[sname]].xyz)
-                    d = float(np.linalg.norm(p - sp))
-                    flux += lum.get(sname, base_lum.get(sname, 0.0)) / (4.0 * np.pi * d * d)
-                rows.append({"d": t / DAY, "flux": flux})
-            return rows
+        rows = []
+        prev = t0
+        for i in range(n):
+            t = t0 + span_days * DAY * i / max(n - 1, 1)
+            self._evolve_sim_between(sim, prev, t, spins=spins)
+            sim.integrate(t, exact_finish_time=1)   # raw copy: no archive
+            prev = t
+            ps = sim.particles
+            p = np.array(ps[idx[body_name]].xyz)
+            props = self._star_props_at(t)
+            lum = {k: v["luminosity_w"] for k, v in props.items()} or base_lum
+            flux = 0.0
+            for sname in star_names:
+                sp = np.array(ps[idx[sname]].xyz)
+                d = float(np.linalg.norm(p - sp))
+                flux += lum.get(sname, base_lum.get(sname, 0.0)) / (4.0 * np.pi * d * d)
+            rows.append({"d": t / DAY, "flux": flux})
+        return rows
 
     def flux_at(self, body_name: str, t_days: float | None) -> dict:
         """Per-star irradiation at body_name. t_days=None -> current time.

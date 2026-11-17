@@ -146,6 +146,27 @@ def test_state_at_is_non_destructive():
     assert past["t_days"] == pytest.approx(5.0)
 
 
+def test_flux_sampling_releases_workspace_lock():
+    """The 400-sample temperature integration runs on a private copy and
+    must NOT hold the workspace lock throughout (2026-11-17: switching
+    between non-star bodies froze poses/evolution for seconds)."""
+    import threading
+    ws = Workspace(build_preset(), grid_getter=None)
+    result = []
+    th = threading.Thread(
+        target=lambda: result.append(ws.flux_series_forward("Αύρα", 3652.5, 400)))
+    th.start()
+    time.sleep(0.1)                       # let the sampler take its snapshot
+    t0 = time.time()
+    with ws.lock:
+        pass                              # a live query must get in promptly
+    waited = time.time() - t0
+    th.join(timeout=60)
+    assert not th.is_alive()
+    assert waited < 0.5, f"temperature sampler held the live lock for {waited:.2f}s"
+    assert len(result[0]) == 400
+
+
 def test_flux_at_excludes_self_irradiation():
     """Querying a STAR's irradiation must not divide by zero on its own
     flux (returned Infinity/NaN before the 2026-11-16 audit)."""

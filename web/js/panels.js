@@ -25,7 +25,17 @@ export function initPanels(context) {
       document.querySelectorAll(".tab-page").forEach((p) => p.classList.remove("active"));
       btn.classList.add("active");
       $(`#tab-${btn.dataset.tab}`).classList.add("active");
-      if (btn.dataset.tab === "temperature" && chart) chart.setSize();
+      if (btn.dataset.tab === "temperature") {
+        if (chart) chart.setSize();
+        else {
+          // temperature is expensive: compute on ENTERING the tab, never on
+          // every catalog selection while the user is looking at params
+          computeTemp().catch((e) => {
+            const box = $("#tp-chart");
+            if (box) box.innerHTML = `<div class="note err">温度表不可用:${e.message}</div>`;
+          });
+        }
+      }
     });
   });
 }
@@ -381,10 +391,12 @@ function renderAtmosphere(b) {
 /* ============================== 温度表 ============================== */
 async function renderTemperature(b) {
   const el = $("#tab-temperature");
+  // a new body invalidates the old body's chart/table immediately
+  chart?.u.destroy();
+  chart = null;
+  lastTempData = null;
   if (b.kind === "star") {
     el.innerHTML = `<div class="note">恒星无温度表。</div>`;
-    chart?.u.destroy();         // release the previous body's chart
-    chart = null;
     return;
   }
   el.innerHTML = `
@@ -410,6 +422,12 @@ async function renderTemperature(b) {
 
   $("#tp-run").addEventListener("click", computeTemp);
   $("#tp-follow").addEventListener("change", () => chart?.setFollow($("#tp-follow").checked));
+  const tempActive = document.querySelector('.ptab[data-tab="temperature"]')
+    ?.classList.contains("active");
+  if (!tempActive) {
+    $("#tp-chart").innerHTML = `<div class="note">切换到温度表页签后计算。</div>`;
+    return;                              // no hidden 400-sample integration
+  }
   try {
     await computeTemp();
   } catch (e) {
