@@ -404,7 +404,10 @@ def api_add_body(body):
         raise HttpError(400, "请输入名称")
     if name in SYSTEM.bodies:
         raise HttpError(400, "名称已存在")
-    ref_name = _body_str(body, "around") or SYSTEM.origin
+    # no privileged root body anymore (ADR-0022): default placement
+    # reference is the most massive body in the world
+    ref_name = _body_str(body, "around") \
+        or max(SYSTEM.bodies.values(), key=lambda b: b.mass_kg).name
     if ref_name not in SYSTEM.bodies:
         raise HttpError(400, f"参考天体 '{ref_name}' 不存在")
     mass_earth = _body_float(body, "mass_earth", 1.0)
@@ -605,7 +608,11 @@ def _sse_loop(h: "Handler") -> None:
                     t_s = ws.sim.t_s
                     if t_s != last_pose_t:
                         ps = ws.sim.sim.particles
+                        mm = np.array([q.m for q in ps])
+                        arr = np.array([q.xyz for q in ps])
+                        bcm = (mm[:, None] * arr).sum(axis=0) / mm.sum()
                         pose = {"t_days": t_s / DAY,
+                                "bcm": [float(x) for x in bcm],
                                 "p": {n: [float(ps[i].x), float(ps[i].y), float(ps[i].z)]
                                       for n, i in ws.sim._index.items()}}
                 if pose is not None:
@@ -786,7 +793,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise HttpError(404, "not found")
         except HttpError as e:
             self._send_json({"detail": e.detail}, e.status)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass                                    # client went away mid-poll
         except Exception:
             log.error("unhandled error in %s %s\n%s", method, self.path,

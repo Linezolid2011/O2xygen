@@ -24,11 +24,11 @@ export function buildCatalog(system, onSelect) {
       if (q && !b.name.toLowerCase().includes(q)) continue;
       const li = document.createElement("li");
       li.dataset.name = b.name;
-      const isOrigin = system.origin === b.name;
+      // no privileged origin body (ADR-0022): the mark slot stays empty;
       // names are user-supplied and persisted: textContent, never innerHTML
       const mark = document.createElement("span");
       mark.className = "child-mark";
-      mark.textContent = isOrigin ? "◎" : "";
+      mark.textContent = "";
       const dot = document.createElement("span");
       dot.className = "dot";
       dot.style.background = kindColor(b);

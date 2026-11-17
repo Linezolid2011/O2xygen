@@ -59,27 +59,23 @@ export async function showBody(name) {
 /* ============================== 基础参数 ============================== */
 async function renderParams(b) {
   const el = $("#tab-params");
-  const isOrigin = ctx.system.origin === b.name;
-  // osculating elements vs the world origin (ADR-0016) - there is no
-  // parent anymore, and no static fallback: state is the only truth
+  // osculating elements vs the REST-OF-SYSTEM barycenter (ADR-0022) - no
+  // privileged root body; state is the only truth
   const osc = lastBodyData?.osculating ?? null;
   const T = (lastBodyData && lastBodyData.period_days) ?? null;
   const el2 = osc ? { a_m: osc.a_m, e: osc.e, inc: osc.inc } : null;
-  const originName = ctx.system.origin ?? "";
   // if we must show the snapshot fallback, re-render once irradiation data lands
-  paramsNeedsRefresh = !isOrigin && !el2;
+  paramsNeedsRefresh = !el2;
 
   el.innerHTML = `
     <div class="sec">
-      <div class="sec-title">轨道${isOrigin ? "" : ` (相对 ${originName} · 瞬时)`}</div>
-      ${isOrigin
-        ? `<div class="note">原点天体 · 世界参考点</div>`
-        : el2 ? `
+      <div class="sec-title">轨道 (相对系统质心 · 瞬时)</div>
+      ${el2 ? `
       <div class="kv"><span class="k">轨道半长轴</span><span class="v">${fmt(el2.a_m / AU, 3)} AU</span></div>
       <div class="kv"><span class="k">偏心率</span><span class="v">${fmt(el2.e, 4)}</span></div>
       <div class="kv"><span class="k">倾角</span><span class="v">${fmt((el2.inc * 180) / Math.PI, 2)}°</span></div>
       <div class="kv"><span class="k">周期</span><span class="v accent">${T > 1200 ? fmt(T / 365.25, 2) + " 年" : fmt(T, 1) + " 天"}</span></div>`
-        : `<div class="note">等待快照…</div>`}
+        : `<div class="note">相对其余系统无束缚轨道（或等待快照…)</div>`}
     </div>
     <div class="sec">
       <div class="sec-title">物理</div>
@@ -467,13 +463,12 @@ export function onTimeChanged() {
 function renderIntro(b) {
   const el = $("#tab-intro");
   const kindLabel = b.kind === "star" ? "恒星" : "天体";
-  const isOrigin = ctx.system.origin === b.name;
   const osc = lastBodyData?.osculating ?? null;
   const T = (lastBodyData && lastBodyData.period_days) ?? null;
   el.innerHTML = `
     <div class="intro-md">
       <h4>${b.name}</h4>
-      <p>${kindLabel}${isOrigin ? ",世界原点天体" : `,瞬时轨道相对 ${ctx.system.origin ?? "原点"}`}。</p>
+      <p>${kindLabel},瞬时轨道相对系统质心。</p>
       ${osc && T ? `<p>瞬时半长轴约 ${fmt(osc.a_m / AU, 2)} AU,周期约 ${fmt(T / 365.25, 2)} 年(N-body 实时状态,非固定轨道)。</p>` : ""}
       <p>质量约 ${b.kind === "star" ? fmt(b.mass_kg / 1.98847e30, 2) + " M☉" : fmt(b.mass_kg / 5.9722e24, 2) + " M⊕"},
       半径约 ${b.kind === "star" ? fmt(b.radius_m / 6.957e8, 3) + " R☉" : fmt(b.radius_m / 6.371e6, 4) + " R⊕"}。</p>

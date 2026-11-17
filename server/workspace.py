@@ -206,38 +206,50 @@ class Workspace:
             bodies[name] = {"p": [float(x) for x in r],
                             "v": [float(x) for x in v],
                             "m": float(ps[i].m)}
-        origin = self.system.origin
-        oidx = idx.get(origin)
+        origin = self.system.origin      # metadata only (ADR-0022)
+        # ADR-0022: osculating elements are computed against the barycenter
+        # of everything EXCEPT the body itself, with mu = G*M_tot. For a
+        # two-body system this is EXACTLY the relative orbit; for a
+        # star-dominated system it is indistinguishable from "vs the star"
+        # at display precision; for near-equal binaries it is the only
+        # non-arbitrary choice. No privileged root body exists.
         elements = {}
         periods = {}                               # body -> period_days | None
-        if oidx is not None:
-            for name, i in idx.items():
-                if name == origin:
-                    continue                    # origin has no elements
-                try:
-                    el = rv_to_elements(
-                        states[name][0] - states[origin][0],
-                        states[name][1] - states[origin][1],
-                        G * (ps[i].m + ps[oidx].m))
-                except Exception:
-                    continue
-                if not (np.isfinite(el.a_m) and np.isfinite(el.e)
-                        and el.a_m > 0.0 and el.e < 1.0):
-                    # hyperbolic vs the origin - legitimate for members of a
-                    # tight inner binary (their osculating-vs-origin view is
-                    # unbound while the PAIR stays bound). Not displayable
-                    # as Keplerian elements; and NaN in JSON would break
-                    # every client-side parse (2026-11-17, Εἴδωλον/Vesper).
-                    continue
-                mu = G * (ps[i].m + ps[oidx].m)
-                T = 2 * np.pi * np.sqrt(el.a_m**3 / mu)
-                elements[name] = {
-                    "a_m": float(el.a_m), "e": float(el.e),
-                    "inc": float(el.inc), "raan": float(el.raan),
-                    "argp": float(el.argp), "nu": float(el.nu),
-                    "period_days": float(T / DAY),
-                }
-                periods[name] = float(T / DAY)
+        names_order = list(idx.keys())
+        ms = np.array([ps[idx[n]].m for n in names_order])
+        pos_arr = np.array([ps[idx[n]].xyz for n in names_order])
+        vel_arr = np.array([ps[idx[n]].vxyz for n in names_order])
+        m_tot = float(ms.sum())
+        tot_p = (ms[:, None] * pos_arr).sum(axis=0)
+        tot_v = (ms[:, None] * vel_arr).sum(axis=0)
+        mu_tot = G * m_tot
+        for k, name in enumerate(names_order):
+            m_rest = m_tot - ms[k]
+            if m_rest <= 0.0:
+                continue
+            r_rest = (tot_p - ms[k] * pos_arr[k]) / m_rest
+            v_rest = (tot_v - ms[k] * vel_arr[k]) / m_rest
+            try:
+                el = rv_to_elements(pos_arr[k] - r_rest,
+                                    vel_arr[k] - v_rest, mu_tot)
+            except Exception:
+                continue
+            if not (np.isfinite(el.a_m) and np.isfinite(el.e)
+                    and el.a_m > 0.0 and el.e < 1.0):
+                # unbound vs the rest of the system - legitimate for
+                # members of a tight inner binary (bound to their
+                # companion, not to the system frame). Not displayable as
+                # Keplerian elements; and NaN in JSON would break every
+                # client-side parse (2026-11-17, Εἴδωλον/Vesper).
+                continue
+            T = 2 * np.pi * np.sqrt(el.a_m**3 / mu_tot)
+            elements[name] = {
+                "a_m": float(el.a_m), "e": float(el.e),
+                "inc": float(el.inc), "raan": float(el.raan),
+                "argp": float(el.argp), "nu": float(el.nu),
+                "period_days": float(T / DAY),
+            }
+            periods[name] = float(T / DAY)
         # display star props: fresh MIST values at t_s where the grid has
         # them (covers copies, whose catalog bodies are NOT updated), else
         # the catalog values the live cadence maintains
@@ -283,15 +295,15 @@ class Workspace:
         speed, and "the last few WALL seconds" at speed - so the recompute
         gap (interval x speed) is always a small fraction of the window and
         no long straight head-chord can appear (2026-11-17 report). Bodies
-        without a bound osculating orbit vs the origin (tight-binary
-        members, hyperbolic view) still get smoke: their physical window
-        falls back to the 400 d cap. Sampled by ONE backward pass on a copy -
-        the live integrator is never disturbed. Results are cached and
-        recomputed once the clock advances by one sample stride (window/90),
-        not a fixed wall interval: slow playback gets smooth sub-second
-        updates, not multi-second freezes.
+        without a bound osculating orbit vs the rest of the system
+        (tight-binary members) still get smoke: their physical window falls
+        back to the 400 d cap. Sampled by ONE backward pass on a copy - the
+        live integrator is never disturbed. Results are cached and recomputed
+        once the clock advances by one sample stride (window/90), not a fixed
+        wall interval: slow playback gets smooth sub-second updates, not
+        multi-second freezes.
         """
-        names = [n for n in self.sim._index if n != self.system.origin]
+        names = list(self.sim._index)      # ADR-0022: EVERY body gets smoke
         if not names:
             return {}
         rate = self._clock_rate(t_s)           # sim seconds per wall second
@@ -322,15 +334,18 @@ class Workspace:
         sim.dt = -abs(self.sim.dt_s)
         idx = self.sim._index
 
-        # trails are ORIGIN-RELATIVE (render frame, ADR-0016): subtract the
-        # origin body's position at every sample, not just the head
-        oidx = idx.get(self.system.origin)
+        # trails are BARYCENTRIC (ADR-0022): subtract the system barycenter
+        # at every sample. Every body gets smoke - a primary star visibly
+        # weaving about the common center of mass is the point.
         ps = sim.particles
+        m0 = np.array([p.m for p in ps])           # masses at t_s (head)
+        m0_tot = float(m0.sum())
 
         def rel(i):
-            p = np.array(ps[i].xyz)
-            q = p - np.array(ps[oidx].xyz) if oidx is not None else p
-            return [float(x) for x in q]
+            arr = np.array([q.xyz for q in ps])
+            mm = np.array([q.m for q in ps])
+            bcm = (mm[:, None] * arr).sum(axis=0) / mm.sum()
+            return [float(x) for x in (np.array(ps[i].xyz) - bcm)]
 
         per_body_n = {n: int(round(windows[n] / step)) + 1 for n in names}
         pts = {n: [None] for n in names}          # head filled below
@@ -348,8 +363,9 @@ class Workspace:
                         pts[n].append(rel(idx[n]))
                         counts[n] += 1
         # heads at the REQUESTED time t_s (the loop ended at t_end; `states`
-        # holds the absolute t_s states)
-        o_head = states[self.system.origin][0] if self.system.origin else np.zeros(3)
+        # holds the absolute t_s states) - barycenter from the same masses
+        pos0 = np.array([states[n][0] for n in idx])
+        o_head = (m0[:, None] * pos0).sum(axis=0) / m0_tot
         for n in names:
             pts[n][0] = [float(x) for x in (np.asarray(states[n][0]) - o_head)]
         # decimate to <= ~90 points per body (the shared grid over-samples

@@ -31,7 +31,7 @@ def _place(sys: System, name: str, kind: str, around: str,
 
 
 def build_preset() -> System:
-    sys = System("白玫瑰", origin="Αστραία")
+    sys = System("白玫瑰", origin=None)   # ADR-0022: barycentric frame, no root body
 
     # origin star — his solved star (see tests/test_stars.py)
     sys.add(Body("Αστραία", STAR, mass_kg=1.29 * M_SUN,

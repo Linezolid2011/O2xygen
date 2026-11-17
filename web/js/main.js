@@ -89,7 +89,7 @@ async function boot() {
     const m = JSON.parse(e.data);
     streamLive = true;
     currentDays = m.t_days;
-    scene.setPose(m.p, m.t_days);
+    scene.setPose(m.p, m.t_days, m.bcm);
   });
   es.addEventListener("trails", (e) => {
     scene.updateTrails(JSON.parse(e.data));

@@ -166,14 +166,13 @@ export class OrbitScene {
 
   buildTrails() {
     /** Smoke trails: SERVER-INTEGRATED paths streamed over SSE (ADR-0021).
-     *  Each update carries the full window (~91 origin-relative points per
-     *  body); per frame we only pin the head vertex to the live server pose
+     *  Each update carries the full window (~91 barycentric points per
+     *  body); per frame we splice the head arc from the pose ring buffer
      *  so the smoke attaches to the body exactly. No client-side history,
-     *  no resampling, no propagation. */
+     *  no resampling, no propagation. ADR-0022: EVERY body gets smoke. */
     this.trailByName = {};
-    this.trailData = {};               // name -> {window_days, points}
+    this.trailData = {};               // name -> {window_days, points, t_days}
     for (const b of this.system.bodies) {
-      if (b.name === this.system.origin) continue;      // origin defines the frame
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(3), 3));
       geo.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(3), 3));
@@ -197,22 +196,34 @@ export class OrbitScene {
       // degraded mode (no SSE yet): positions come from the poll itself
       const p = {};
       for (const [n, b] of Object.entries(snap.bodies ?? {})) p[n] = b.p;
-      this.pose = { p, t_days: snap.t_days };
+      this.pose = { p, t_days: snap.t_days, bcm: this._bcmOf(p) };
     }
     this._starBase = this._starBase ?? {};      // first snapshot = scale baseline
     this.updateStars(snap);
   }
 
-  /** Authoritative pose from the SSE stream (absolute coordinates). Kept in
-   *  a short ring buffer: the smoke's head arc between the last recomputed
-   *  path and NOW is drawn from these authoritative samples - never from a
-   *  straight chord and never from client-side integration. */
-  setPose(p, tDays) {
+  /** Barycenter of a {name: [x,y,z]} position map, using the masses from
+   *  the latest meta snapshot (degraded path only; SSE poses carry bcm). */
+  _bcmOf(p) {
+    let mx = 0, my = 0, mz = 0, mt = 0;
+    for (const [n, q] of Object.entries(p)) {
+      const m = this.snap?.bodies?.[n]?.m ?? 0;
+      mx += m * q[0]; my += m * q[1]; mz += m * q[2]; mt += m;
+    }
+    return mt > 0 ? [mx / mt, my / mt, mz / mt] : [0, 0, 0];
+  }
+
+  /** Authoritative pose from the SSE stream (absolute coordinates + the
+   *  server-computed barycenter). Kept in a short ring buffer: the smoke's
+   *  head arc between the last recomputed path and NOW is drawn from these
+   *  authoritative samples - never from a straight chord and never from
+   *  client-side integration. */
+  setPose(p, tDays, bcm) {
     if (this.pose && tDays < this.pose.t_days - 1e-9) {
       this.poseHist = [];          // clock rewound (rollback/world switch)
     }
-    this.pose = { p, t_days: tDays };
-    this.poseHist.push({ t: tDays, p });
+    this.pose = { p, t_days: tDays, bcm: bcm ?? this._bcmOf(p) };
+    this.poseHist.push({ t: tDays, p, bcm: this.pose.bcm });
     if (this.poseHist.length > 600) this.poseHist.shift();   // ~10 s at 60 Hz
   }
 
@@ -285,17 +296,17 @@ export class OrbitScene {
    *  from authoritative streamed poses (ring buffer) - curved at any speed,
    *  with zero client-side physics. */
   drawTrails() {
-    const originName = this.system.origin;
     for (const [name, t] of Object.entries(this.trailByName)) {
       const data = this.trailData[name];
       if (!data || data.points.length < 2) continue;
-      // splice: pose samples newer than the far path's head, oldest-first
+      // splice: pose samples newer than the far path's head, oldest-first,
+      // each sample made barycentric with ITS OWN barycenter (ADR-0022)
       const splice = [];
       for (let i = this.poseHist.length - 1; i >= 0; i--) {
         const s = this.poseHist[i];
         if (s.t <= data.t_days) break;
-        const pn = s.p[name], po = s.p[originName];
-        if (pn && po) splice.push([pn[0] - po[0], pn[1] - po[1], pn[2] - po[2]]);
+        const pn = s.p[name];
+        if (pn && s.bcm) splice.push([pn[0] - s.bcm[0], pn[1] - s.bcm[1], pn[2] - s.bcm[2]]);
       }
       splice.reverse();
       const stride = Math.max(1, Math.ceil(splice.length / 64));
@@ -454,11 +465,10 @@ export class OrbitScene {
       this.camera.near = near;
       this.camera.updateProjectionMatrix();
     }
-    // ADR-0016: the render frame is ORIGIN-RELATIVE - everything is drawn at
-    // (absolute position - origin body's position), all from server poses.
+    // ADR-0022: the render frame is BARYCENTRIC - everything is drawn at
+    // (absolute position - system barycenter), all from server poses.
     const tS = tDays * DAY;
-    const originName = this.system.origin;
-    const op = originName ? this._posOf(originName) : [0, 0, 0];
+    const op = this.pose?.bcm ?? [0, 0, 0];
     for (const b of this.system.bodies) {
       const g = this.bodyGroups[b.name];
       if (!g) continue;
