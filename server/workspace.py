@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 import threading
+import time
 import numpy as np
 
 from o2xygen.constants import DAY, G, M_SUN
@@ -22,6 +23,8 @@ from o2xygen.system import System, Body, STAR
 
 EVOLVE_CADENCE_S = 1.0 * 365.25 * DAY   # stellar evolution update cadence
 SECONDS_PER_YEAR = 365.25 * DAY
+TRAIL_WALL_SPAN_S = 4.0                 # smoke covers ~this many WALL seconds
+                                        # of recent history at speed (ADR-0021)
 
 
 class Workspace:
@@ -36,7 +39,8 @@ class Workspace:
         # tracks (current mass) before the first query answers. The grid may
         # still be loading at startup -> settle lazily on first contact.
         self._settled = False
-        self._trail_cache = None            # (t_s, min_window_s, result)
+        self._trail_cache = None            # (t_s, min_window_s, result, windows)
+        self._rate_hist = []                # (wall_s, t_s) for clock-rate estimate
         try:
             self._settled = self._apply_evolution_at(0.0)
         except Exception:
@@ -247,28 +251,53 @@ class Workspace:
         }
 
     # -------------------------------------------------------------- trails
+    def _clock_rate(self, t_s: float) -> float:
+        """Recent sim-clock rate [sim s / wall s], from samples taken at
+        trail-query time (the SSE emitter and the poll both drive this).
+        0 when the clock is frozen - windows then stay purely physical."""
+        now = time.time()
+        hist = self._rate_hist
+        hist.append((now, t_s))
+        while len(hist) > 2 and now - hist[0][0] > 2.0:
+            hist.pop(0)
+        if len(hist) < 2 or hist[-1][0] - hist[0][0] < 0.2:
+            return 0.0
+        return abs(t_s - hist[0][1]) / (hist[-1][0] - hist[0][0])
+
     def _trails(self, sim, states, elements, t_s: float) -> dict:
         """Actual integrated paths over a trailing window (the "smoke").
 
-        Per body the window is a fraction of its osculating period, clamped
-        to [20 d, 400 d]. Sampled by ONE backward pass on a copy - the live
-        integrator is never disturbed. Results are cached: while the clock
-        barely moves (idle polling, paused evolution) the previous paths are
-        served instead of re-integrating ~2000 steps per poll.
+        Per body the window is max(physics, rate x TRAIL_WALL_SPAN_S): a
+        fraction of its osculating period clamped to [20 d, 400 d] at low
+        speed, and "the last few WALL seconds" at speed - so the recompute
+        gap (interval x speed) is always a small fraction of the window and
+        no long straight head-chord can appear (2026-11-17 report). Sampled
+        by ONE backward pass on a copy - the live integrator is never
+        disturbed. Results are cached and recomputed once the clock advances
+        by one sample stride (window/90), not a fixed wall interval: slow
+        playback gets smooth sub-second updates, not multi-second freezes.
         """
         names = list(elements.keys())          # elements already exclude the origin
         if not names:
             return {}
+        rate = self._clock_rate(t_s)           # sim seconds per wall second
         # windows in SECONDS (t_s is seconds - do not mix units!)
-        windows = {n: float(np.clip(0.4 * elements[n]["period_days"], 20.0, 400.0)) * DAY
+        windows = {n: max(float(np.clip(0.4 * elements[n]["period_days"],
+                                        20.0, 400.0)) * DAY,
+                          rate * TRAIL_WALL_SPAN_S)
                    for n in names}
         K = 90                                     # samples per body window
         step = min(windows.values()) / K           # shared sample grid
+        # work safety valve: never more than ~2000 integrate calls per pass
+        # (only bites on pathological window spreads)
+        step = max(step, max(windows.values()) / 2000.0)
         t_end = t_s - max(windows.values())
 
         cache = self._trail_cache
-        if cache is not None and abs(t_s - cache[0]) < 0.25 * cache[1] \
-                and set(cache[2]) == set(names):
+        if cache is not None and set(cache[2]) == set(names) \
+                and abs(t_s - cache[0]) < cache[1] / K \
+                and all(abs(windows[n] - cache[3][n]) <= 0.1 * cache[3][n]
+                        for n in names):
             return cache[2]
 
         if sim is self.sim:
@@ -314,7 +343,7 @@ class Workspace:
             stride = max(1, len(p) // 90)
             out[n] = {"window_days": windows[n] / DAY,
                       "points": p[::stride] if len(p) > 90 else p}
-        self._trail_cache = (t_s, min(windows.values()), out)
+        self._trail_cache = (t_s, min(windows.values()), out, windows)
         return out
 
     # -------------------------------------------------------------- saving

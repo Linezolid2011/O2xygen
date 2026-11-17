@@ -41,7 +41,9 @@ export class OrbitScene {
   constructor(canvas, system, callbacks = {}) {
     this.system = system;
     this.cb = callbacks;
-    this.snap = null;             // latest server N-body snapshot (ADR-0015)
+    this.snap = null;             // latest server meta snapshot (poll)
+    this.pose = null;             // latest server pose (SSE)
+    this.poseHist = [];           // ring buffer of recent poses (head arc)
     this.selected = null;
     this.hover = null;
     this.is2D = false;
@@ -201,9 +203,17 @@ export class OrbitScene {
     this.updateStars(snap);
   }
 
-  /** Authoritative pose from the SSE stream (absolute coordinates). */
+  /** Authoritative pose from the SSE stream (absolute coordinates). Kept in
+   *  a short ring buffer: the smoke's head arc between the last recomputed
+   *  path and NOW is drawn from these authoritative samples - never from a
+   *  straight chord and never from client-side integration. */
   setPose(p, tDays) {
+    if (this.pose && tDays < this.pose.t_days - 1e-9) {
+      this.poseHist = [];          // clock rewound (rollback/world switch)
+    }
     this.pose = { p, t_days: tDays };
+    this.poseHist.push({ t: tDays, p });
+    if (this.poseHist.length > 600) this.poseHist.shift();   // ~10 s at 60 Hz
   }
 
   /** Stellar evolution made visible: swell + redden stars relative to the
@@ -262,20 +272,35 @@ export class OrbitScene {
       // store oldest-first; the fade gradient is index-static per length
       const pts = data.points.slice().reverse();
       const prev = this.trailData[name];
-      this.trailData[name] = { window_days: data.window_days, points: pts };
+      this.trailData[name] = { window_days: data.window_days, points: pts,
+                               t_days: payload.t_days };
       if (!prev || prev.points.length !== pts.length) {
         t.posArr = null;               // force buffer realloc in drawTrails
       }
     }
   }
 
-  /** Per-frame smoke draw: copy the latest server path into the GPU buffer
-   *  and pin the head vertex to the body's live (server-posed) position. */
+  /** Per-frame smoke draw: the far path comes from the server's backward
+   *  integration; the head arc between its compute time and NOW is spliced
+   *  from authoritative streamed poses (ring buffer) - curved at any speed,
+   *  with zero client-side physics. */
   drawTrails() {
+    const originName = this.system.origin;
     for (const [name, t] of Object.entries(this.trailByName)) {
       const data = this.trailData[name];
       if (!data || data.points.length < 2) continue;
-      const pts = data.points;
+      // splice: pose samples newer than the far path's head, oldest-first
+      const splice = [];
+      for (let i = this.poseHist.length - 1; i >= 0; i--) {
+        const s = this.poseHist[i];
+        if (s.t <= data.t_days) break;
+        const pn = s.p[name], po = s.p[originName];
+        if (pn && po) splice.push([pn[0] - po[0], pn[1] - po[1], pn[2] - po[2]]);
+      }
+      splice.reverse();
+      const stride = Math.max(1, Math.ceil(splice.length / 64));
+      const pts = data.points.concat(
+        stride > 1 ? splice.filter((_, i) => i % stride === 0) : splice);
       const n = pts.length;
       if (!t.posArr || t.posArr.length !== n * 3) {
         const geo = this._trailGeometry(pts, t.baseColor);
@@ -289,8 +314,7 @@ export class OrbitScene {
           t.posArr[i * 3 + 2] = pts[i][2];
         }
       }
-      // head pin: the server path ends at its compute time; the body is
-      // drawn at the newest streamed pose, and the smoke must attach exactly
+      // ultimate head pin: last vertex IS the body's live position
       const g = this.bodyGroups[name];
       if (g) {
         t.posArr[(n - 1) * 3] = g.position.x;
