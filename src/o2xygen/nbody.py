@@ -288,14 +288,32 @@ class NBodySimulation:
 
     def osculating_elements(self, body_name: str,
                             ref: str | None = None) -> OsculatingElements:
-        """Elements of body_name relative to `ref` (default: the world's
-        origin body). With no hierarchy this is a VIEW, not an identity:
-        a moon's elements w.r.t. the star look like a perturbed planet."""
-        ref = ref or self.system.origin
-        if ref is None or ref == body_name:
-            raise ValueError("osculating elements need a distinct reference body")
-        i, j = self._index[body_name], self._index[ref]
+        """Elements of body_name relative to an explicit `ref`, or to the
+        rest-of-system barycenter when no ref/origin exists (ADR-0022).
+        With no hierarchy this is a VIEW, not an identity: a moon's elements
+        w.r.t. the system look like a perturbed planet's."""
+        i = self._index[body_name]
         ps = self.sim.particles
+        ref = ref or self.system.origin
+        if ref is None:
+            names = list(self._index)
+            ms = np.array([ps[self._index[n]].m for n in names])
+            pos = np.array([ps[self._index[n]].xyz for n in names])
+            vel = np.array([ps[self._index[n]].vxyz for n in names])
+            m_tot = float(ms.sum())
+            m_rest = m_tot - ms[names.index(body_name)]
+            if m_rest <= 0.0:
+                raise ValueError("osculating elements need a nonzero rest mass")
+            r_rest = ((ms[:, None] * pos).sum(axis=0)
+                      - ms[names.index(body_name)] * pos[names.index(body_name)]) / m_rest
+            v_rest = ((ms[:, None] * vel).sum(axis=0)
+                      - ms[names.index(body_name)] * vel[names.index(body_name)]) / m_rest
+            r = pos[names.index(body_name)] - r_rest
+            v = vel[names.index(body_name)] - v_rest
+            return rv_to_elements(r, v, G * m_tot)
+        if ref == body_name:
+            raise ValueError("osculating elements need a distinct reference body")
+        j = self._index[ref]
         r = np.array(ps[i].xyz) - np.array(ps[j].xyz)
         v = np.array(ps[i].vxyz) - np.array(ps[j].vxyz)
         mu = G * (ps[i].m + ps[j].m)

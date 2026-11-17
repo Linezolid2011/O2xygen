@@ -9,19 +9,21 @@ Schema v1:
   "format": "o2xygen-world",
   "version": 1,
   "name": "...",
-  "origin": "<body name>",              # display/frame reference body
+  "origin": "<body name> or null",       # metadata only (ADR-0022)
   "bodies": [
     {"name", "kind": "star"|"body",
      "mass_kg",                          # star: INITIAL mass (MIST seed)
      "pos0_m": [x,y,z], "vel0_m": [x,y,z],
+     "spin_axis": [x,y,z],               # unit vector, inertial frame
+     "spin_rate_rad_s": |omega|,         # angular speed at the epoch
+     "spin_phase_rad": phase,            # rotation phase at the epoch
      # star only:
      "radius_m": <initial radius>, "feh": ..., "age0_gyr": ...,
      # non-star only:
      "radius_m": ..., "albedo": ...,
-     "rotation_period_s": optional,
      # both kinds:
      "extra": {...}}                     # free-form metadata (cmf, ring, atm,
-                                         # composition_preset, teff_k, ...)
+                                         # love_k2, tidal_dt_s, ...)
   ]
 }
 Time origin: t = 0 by definition; displays convert seconds to a uniform
@@ -70,9 +72,12 @@ def system_to_dict(system: System) -> dict:
             "pos0_m": [float(x) for x in b.pos0],
             "vel0_m": [float(x) for x in b.vel0],
             "radius_m": float(b.radius_m),
+            # spin state is authoritative; rotation_period_s is only a
+            # derived display value and is deliberately NOT saved
+            "spin_axis": [float(x) for x in b.spin_axis],
+            "spin_rate_rad_s": float(b.spin_rate_rad_s),
+            "spin_phase_rad": float(b.spin_phase_rad),
         }
-        if b.rotation_period_s is not None:
-            d["rotation_period_s"] = float(b.rotation_period_s)
         if b.kind == STAR:
             d["feh"] = float(b.extra.get("feh", 0.0))
             d["age0_gyr"] = float(b.extra.get("age0_gyr", 1.0))
@@ -126,7 +131,10 @@ def dict_to_system(d: dict) -> System:
             vel0=np.array(bd["vel0_m"], dtype=float),
             radius_m=float(bd.get("radius_m", 0.0)),
             albedo=albedo,
-            rotation_period_s=bd.get("rotation_period_s"),
+            rotation_period_s=bd.get("rotation_period_s"),  # legacy fallback
+            spin_axis=np.array(bd.get("spin_axis", [0.0, 0.0, 1.0]), dtype=float),
+            spin_rate_rad_s=bd.get("spin_rate_rad_s"),
+            spin_phase_rad=float(bd.get("spin_phase_rad", 0.0)),
             # off-grid stars (e.g. white dwarfs: no MIST tracks) carry a
             # hand-specified luminosity in extra - honour it on load or a
             # reload would freeze them dark (MIST stars are re-settled at

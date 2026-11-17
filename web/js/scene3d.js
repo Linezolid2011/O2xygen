@@ -7,6 +7,11 @@ import { AU, DAY } from "./kepler.js";
 
 const texLoaderCache = {};
 const _followDelta = new THREE.Vector3();
+const _Y_AXIS = new THREE.Vector3(0, 1, 0);
+const _Z_AXIS = new THREE.Vector3(0, 0, 1);
+const _spinAxis = new THREE.Vector3();
+const _qAlign = new THREE.Quaternion();
+const _qSpin = new THREE.Quaternion();
 function glowTexture() {
   if (texLoaderCache.glow) return texLoaderCache.glow;
   const c = document.createElement("canvas");
@@ -91,6 +96,7 @@ export class OrbitScene {
     this.bodyMeshes = {};
     this.bodyGroups = {};
     this.pickProxies = {};
+    this.ringMeshes = {};
     // ADR-0017: display radius = physical radius, no caps, no baselines.
     this.displayRadii = {};
     for (const b of this.system.bodies) {
@@ -155,8 +161,10 @@ export class OrbitScene {
         const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
           color: 0xc8b18a, side: THREE.DoubleSide, transparent: true, opacity: 0.35,
         }));
-        ring.rotation.x = Math.PI / 2 - 0.35;
+        // RingGeometry normal is +Z; update() aligns it to the live spin
+        // axis every frame (equatorial rings, ADR-0023)
         group.add(ring);
+        this.ringMeshes[b.name] = ring;
       }
       this.scene.add(group);
       this.bodyMeshes[b.name] = mesh;
@@ -467,18 +475,29 @@ export class OrbitScene {
     }
     // ADR-0022: the render frame is BARYCENTRIC - everything is drawn at
     // (absolute position - system barycenter), all from server poses.
-    const tS = tDays * DAY;
     const op = this.pose?.bcm ?? [0, 0, 0];
     for (const b of this.system.bodies) {
       const g = this.bodyGroups[b.name];
       if (!g) continue;
       const p = this._posOf(b.name);
       g.position.set(p[0] - op[0], p[1] - op[1], p[2] - op[2]);
-      // slow spin for non-stars
-      if (b.kind !== "star" && b.rotation_period_s) {
-        const m = this.bodyMeshes[b.name];
-        m.rotation.y = (tS / b.rotation_period_s) * 2 * Math.PI;
-      }
+      // server spin state: axis + rate + phase at the snapshot's clock;
+      // only the display phase advances between meta polls (ADR-0023)
+      const sp = this.snap?.spins?.[b.name];
+      const axis = sp?.axis ?? b.spin_axis ?? [0, 0, 1];
+      const rate = sp?.rate_rad_s ?? b.spin_rate_rad_s ??
+        (b.rotation_period_s ? 2 * Math.PI / b.rotation_period_s : 0);
+      const phase0 = sp?.phase_rad ?? b.spin_phase_rad ?? 0;
+      const phase = phase0 + rate * (tDays - (this.snap?.t_days ?? tDays)) * DAY;
+      _spinAxis.set(axis[0], axis[1], axis[2]);
+      if (_spinAxis.lengthSq() < 1e-30) _spinAxis.copy(_Y_AXIS);
+      else _spinAxis.normalize();
+      _qAlign.setFromUnitVectors(_Y_AXIS, _spinAxis);
+      _qSpin.setFromAxisAngle(_Y_AXIS, phase);
+      const m = this.bodyMeshes[b.name];
+      m.quaternion.copy(_qAlign).multiply(_qSpin);
+      const ring = this.ringMeshes[b.name];
+      if (ring) ring.quaternion.setFromUnitVectors(_Z_AXIS, _spinAxis);
     }
     // star light follows the primary star (rendered position)
     const primary = this.system.bodies.find((b) => b.kind === "star");

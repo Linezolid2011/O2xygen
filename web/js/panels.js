@@ -42,11 +42,13 @@ export async function showBody(name) {
   $("#body-swatch").style.background = b.kind === "star"
     ? `#${teffColor(b.extra?.teff_k ?? 5772).getHexString()}` : "#7aa2e8";
 
-  // prefetch osculating data so renderParams can prefer live elements
+  // render catalog physics immediately; the osculating/irradiation fetch
+  // must never leave the previous body's panel on screen while in flight
+  renderParams(b);
   try { lastBodyData = await api.body(name, null); }   // null = 当前时刻(锁内解析)
   catch { lastBodyData = null; }
   if (current !== body) return;   // stale: a newer showBody won
-  renderParams(b);
+  renderParams(b);                // fill in live elements when they arrive
   // TEMP-DISABLED(2026-11-15): 结构/大气挡路,后续加回(index.html 的页签已同步隐藏)
   // renderStructure(b);
   // renderAtmosphere(b);
@@ -64,8 +66,9 @@ async function renderParams(b) {
   const osc = lastBodyData?.osculating ?? null;
   const T = (lastBodyData && lastBodyData.period_days) ?? null;
   const el2 = osc ? { a_m: osc.a_m, e: osc.e, inc: osc.inc } : null;
-  // if we must show the snapshot fallback, re-render once irradiation data lands
-  paramsNeedsRefresh = !el2;
+  // re-render only when the first live fetch actually failed; a body with
+  // no bound osculating orbit is a valid final state, not a pending one
+  paramsNeedsRefresh = !lastBodyData;
 
   el.innerHTML = `
     <div class="sec">
@@ -82,6 +85,8 @@ async function renderParams(b) {
       <div class="kv"><span class="k">质量</span><span class="v">${b.kind === "star" ? fmt(b.mass_kg / 1.98847e30, 4) + " M☉" : fmt(b.mass_kg / 5.9722e24, 3) + " M⊕"}</span></div>
       <div class="kv"><span class="k">半径</span><span class="v">${b.kind === "star" ? fmt(b.radius_m / 6.957e8, 4) + " R☉" : fmt(b.radius_m / 6.371e6, 4) + " R⊕"}</span></div>
       ${b.rotation_period_s ? `<div class="kv"><span class="k">自转周期</span><span class="v">${fmt(b.rotation_period_s / 3600, 1)} h</span></div>` : ""}
+      <div class="kv"><span class="k">自转轴</span><span class="v mono">[${(b.spin_axis ?? [0, 0, 1]).map((x) => Number(x).toFixed(3)).join(", ")}]</span></div>
+      <div class="kv"><span class="k">自转角速度</span><span class="v">${Number(b.spin_rate_rad_s ?? 0).toExponential(3)} rad/s</span></div>
       ${b.kind !== "star" ? `<div class="kv"><span class="k">反照率</span><span class="v">${fmt(b.albedo, 2)}</span></div>` : ""}
       ${b.extra?.teff_k ? `<div class="kv"><span class="k">有效温度</span><span class="v accent">${fmt(b.extra.teff_k, 0)} K</span></div>` : ""}
     </div>

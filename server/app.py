@@ -167,6 +167,9 @@ def body_json(b: Body) -> dict:
         "mass_kg": b.mass_kg, "radius_m": b.radius_m,
         "albedo": b.albedo,
         "rotation_period_s": b.rotation_period_s,
+        "spin_axis": [float(x) for x in b.spin_axis],
+        "spin_rate_rad_s": float(b.spin_rate_rad_s),
+        "spin_phase_rad": float(b.spin_phase_rad),
         "luminosity_w": b.luminosity_w,
         "extra": b.extra,
     }
