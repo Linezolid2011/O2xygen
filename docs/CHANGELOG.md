@@ -334,7 +334,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   pose ~50–60 Hz、trails ~4–6 Hz;Playwright 全流程烟测(启动/推演/
   暂停冻结/取消回滚)零页面错误、零 HTTP≥400。
 
-## [0.1.8] - 2026-11-17
+## [0.2.0] - 2026-11-17
 
 ### 自转与潮汐(ADR-0023)
 
@@ -384,7 +384,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 回扫成本有安全阀(单次 ≤~2000 次积分调用);窗口集合变化 >10% 时缓存
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
-[0.1.8]: https://github.com/Linezolid2011/O2xygen/tree/0.1.8
+[0.2.0]: https://github.com/Linezolid2011/O2xygen/tree/0.2.0
 [0.1.7]: https://github.com/Linezolid2011/O2xygen/tree/0.1.7
 [0.1.6]: https://github.com/Linezolid2011/O2xygen/tree/0.1.6
 [0.1.5]: https://github.com/Linezolid2011/O2xygen/tree/0.1.5
