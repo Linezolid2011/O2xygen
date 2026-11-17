@@ -155,6 +155,23 @@ def test_flux_at_excludes_self_irradiation():
     assert np.isfinite(got["illumination"]["total"])
 
 
+def test_hyperbolic_vs_origin_keeps_smoke_and_valid_json():
+    """Tight-binary members can be osculating-HYPERBOLIC vs the origin
+    (bound to their companion, not to the origin - the Εἴδωλον/Vesper
+    case, 2026-11-17). They must (a) drop out of the elements view rather
+    than emit a<0 / NaN payloads (NaN in JSON breaks every client parse),
+    and (b) keep their smoke via the 400 d fallback window."""
+    import json
+    ws = Workspace(build_preset(), grid_getter=None)
+    i = ws.sim._index["Νεφέλη"]
+    p = ws.sim.sim.particles[i]
+    p.vx, p.vy, p.vz = (v * 3.0 for v in (p.vx, p.vy, p.vz))
+    snap = ws.state_at(None)
+    assert "Νεφέλη" not in snap["elements"]
+    assert "Νεφέλη" in snap["trails"]
+    json.dumps(snap, allow_nan=False)      # must not raise
+
+
 def test_job_aborts_loudly_on_external_clock_move(tmp_path):
     """If anything moves the shared clock between chunks, the job must
     abort with a LOUD error and skip the final save - never report a

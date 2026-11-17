@@ -209,6 +209,7 @@ class Workspace:
         origin = self.system.origin
         oidx = idx.get(origin)
         elements = {}
+        periods = {}                               # body -> period_days | None
         if oidx is not None:
             for name, i in idx.items():
                 if name == origin:
@@ -220,13 +221,23 @@ class Workspace:
                         G * (ps[i].m + ps[oidx].m))
                 except Exception:
                     continue
-                T = 2 * np.pi * np.sqrt(el.a_m**3 / (G * (ps[i].m + ps[oidx].m)))
+                if not (np.isfinite(el.a_m) and np.isfinite(el.e)
+                        and el.a_m > 0.0 and el.e < 1.0):
+                    # hyperbolic vs the origin - legitimate for members of a
+                    # tight inner binary (their osculating-vs-origin view is
+                    # unbound while the PAIR stays bound). Not displayable
+                    # as Keplerian elements; and NaN in JSON would break
+                    # every client-side parse (2026-11-17, Εἴδωλον/Vesper).
+                    continue
+                mu = G * (ps[i].m + ps[oidx].m)
+                T = 2 * np.pi * np.sqrt(el.a_m**3 / mu)
                 elements[name] = {
                     "a_m": float(el.a_m), "e": float(el.e),
                     "inc": float(el.inc), "raan": float(el.raan),
                     "argp": float(el.argp), "nu": float(el.nu),
                     "period_days": float(T / DAY),
                 }
+                periods[name] = float(T / DAY)
         # display star props: fresh MIST values at t_s where the grid has
         # them (covers copies, whose catalog bodies are NOT updated), else
         # the catalog values the live cadence maintains
@@ -245,7 +256,7 @@ class Workspace:
             "bodies": bodies,
             "elements": elements,
             "stars": stars,
-            "trails": self._trails(sim, states, elements, t_s) if with_trails else {},
+            "trails": self._trails(sim, states, periods, t_s) if with_trails else {},
             "luminosity_w": {s.name: stars[s.name]["luminosity_w"]
                              for s in self.system.stars()},
         }
@@ -264,28 +275,34 @@ class Workspace:
             return 0.0
         return abs(t_s - hist[0][1]) / (hist[-1][0] - hist[0][0])
 
-    def _trails(self, sim, states, elements, t_s: float) -> dict:
+    def _trails(self, sim, states, periods: dict, t_s: float) -> dict:
         """Actual integrated paths over a trailing window (the "smoke").
 
         Per body the window is max(physics, rate x TRAIL_WALL_SPAN_S): a
-        fraction of its osculating period clamped to [20 d, 400 d] at low
+        fraction of the osculating period clamped to [20 d, 400 d] at low
         speed, and "the last few WALL seconds" at speed - so the recompute
         gap (interval x speed) is always a small fraction of the window and
-        no long straight head-chord can appear (2026-11-17 report). Sampled
-        by ONE backward pass on a copy - the live integrator is never
-        disturbed. Results are cached and recomputed once the clock advances
-        by one sample stride (window/90), not a fixed wall interval: slow
-        playback gets smooth sub-second updates, not multi-second freezes.
+        no long straight head-chord can appear (2026-11-17 report). Bodies
+        without a bound osculating orbit vs the origin (tight-binary
+        members, hyperbolic view) still get smoke: their physical window
+        falls back to the 400 d cap. Sampled by ONE backward pass on a copy -
+        the live integrator is never disturbed. Results are cached and
+        recomputed once the clock advances by one sample stride (window/90),
+        not a fixed wall interval: slow playback gets smooth sub-second
+        updates, not multi-second freezes.
         """
-        names = list(elements.keys())          # elements already exclude the origin
+        names = [n for n in self.sim._index if n != self.system.origin]
         if not names:
             return {}
         rate = self._clock_rate(t_s)           # sim seconds per wall second
-        # windows in SECONDS (t_s is seconds - do not mix units!)
-        windows = {n: max(float(np.clip(0.4 * elements[n]["period_days"],
-                                        20.0, 400.0)) * DAY,
-                          rate * TRAIL_WALL_SPAN_S)
-                   for n in names}
+        # windows in SECONDS (t_s is seconds - do not mix units!). A missing
+        # or non-finite period (hyperbolic vs origin) uses the 400 d cap.
+        def _phys(n):
+            p = periods.get(n)
+            if p is None or not np.isfinite(p) or p <= 0:
+                return 400.0 * DAY
+            return float(np.clip(0.4 * p, 20.0, 400.0)) * DAY
+        windows = {n: max(_phys(n), rate * TRAIL_WALL_SPAN_S) for n in names}
         K = 90                                     # samples per body window
         step = min(windows.values()) / K           # shared sample grid
         # work safety valve: never more than ~2000 integrate calls per pass

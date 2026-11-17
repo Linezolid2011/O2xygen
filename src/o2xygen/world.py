@@ -127,6 +127,11 @@ def dict_to_system(d: dict) -> System:
             radius_m=float(bd.get("radius_m", 0.0)),
             albedo=albedo,
             rotation_period_s=bd.get("rotation_period_s"),
+            # off-grid stars (e.g. white dwarfs: no MIST tracks) carry a
+            # hand-specified luminosity in extra - honour it on load or a
+            # reload would freeze them dark (MIST stars are re-settled at
+            # boot anyway, so this only ever matters off-grid)
+            luminosity_w=float(extra.get("luminosity_w", 0.0)) if kind == STAR else 0.0,
             extra=extra,
         ))
     return system
