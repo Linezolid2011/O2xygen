@@ -134,8 +134,26 @@ async function boot() {
     selected = name;
     catalog.select(name);
     scene.select(name);
+    refreshSky();
     await showBody(name);
   }
+
+  // Real starfield: server computes observer-centric Hipparcos directions.
+  // Selection triggers an immediate update; while evolving, a 2 s refresh
+  // advances proper motion and the body's parallax without doing any of it
+  // on the client.
+  let skyInFlight = false;
+  async function refreshSky() {
+    if (!selected || skyInFlight) return;
+    const body = selected;
+    skyInFlight = true;
+    try {
+      const data = await api.sky(body);
+      if (body === selected) scene.setSky(data);
+    } catch { /* keep the previous sky during a transient failure */ }
+    finally { skyInFlight = false; }
+  }
+  setInterval(() => { if (evolving) refreshSky(); }, 2000);
 
   // view controls
   document.querySelectorAll("#view-toggle .pill").forEach((pill) => {
@@ -147,6 +165,7 @@ async function boot() {
   });
   $("#btn-focus").addEventListener("click", () => scene.focusSelected());
   $("#btn-grid").addEventListener("click", () => scene.toggleGrid());
+  $("#btn-stars").addEventListener("click", () => scene.toggleStars());
 
   // render loop: draw exactly what the server sent - no clock, no physics.
   // A 250 ms ticker drives the clock label and time-followed panels (their
@@ -319,6 +338,7 @@ async function boot() {
         ...afState, position_j2000_pc: position, epoch_jd_tt: epoch,
       });
       system.astro_frame = afState;
+      refreshSky();
       afModal.hidden = true;
     } catch (e) { afStatus.textContent = e.message; }
   });

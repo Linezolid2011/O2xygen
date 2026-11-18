@@ -72,8 +72,13 @@ def quat_rotate(q_wxyz, v, inverse: bool = False) -> np.ndarray:
         q[1:] *= -1.0
     w = q[0]
     u = q[1:]
-    v = np.asarray(v, dtype=float).reshape(3)
-    return 2.0 * np.dot(u, v) * u + (w * w - np.dot(u, u)) * v \
+    v = np.asarray(v, dtype=float)
+    if v.shape[-1] != 3:
+        raise ValueError("quat_rotate expects a 3-vector or an (...,3) array")
+    # vectorized over any leading dimensions: used for both single bodies
+    # and the filtered star direction array
+    dot = np.sum(v * u, axis=-1)[..., None]
+    return 2.0 * dot * u + (w * w - np.dot(u, u)) * v \
         + 2.0 * w * np.cross(u, v)
 
 

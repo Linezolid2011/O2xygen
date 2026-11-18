@@ -43,7 +43,8 @@
   入档;自动存档同步推进历元(尚未接星场)。
 - **温度管线**:三种平衡温度体制 + 反照率,温度表从当前时刻向前采样。
 - **WebUI**:标准库 http.server + SSE 推流 + Three.js + uPlot,无构建步骤;
-  服务器驱动渲染(客户端零物理)、服务器积分烟雾轨迹、相对原点的瞬时
+  服务器驱动渲染(客户端零物理)、服务器积分烟雾轨迹、**Hipparcos
+  真实星场**(任意天体位置/历元的视差与星等)、相对系统质心的瞬时
   根数面板、选中即跟随相机、一键计算(结构 → 大气 → 温度表)。
 
 ## 运行
@@ -58,7 +59,7 @@ python -m venv .venv
 `http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
 测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
-测试(78 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
+测试(81 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -76,6 +77,8 @@ python -m venv .venv
 Hipparcos 验证数据位于 `.data/hip2000/`(不入库):`hip_main.dat` 为
 J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
 `scripts/verify_hipparcos_epoch.py` 复验两者的逐星等价性。
+运行时星场使用随仓库分发的 `.data/hipparcos.npz`(112,846 星,3.11 MB),
+无需保留原始表或旧 skycalc 项目。
 
 ## 仓库结构
 
@@ -83,7 +86,7 @@ J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
 src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
 server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         78 项标定与积分验收测试
+tests/         81 项标定与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)
@@ -93,4 +96,4 @@ scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存�
 
 干净室重建项目:以好友的闭源应用「ORBIT」的公开输出(截图与显示数值)
 为参照系,全部代码与资源独立实现(ADR-0001)。MIST 数据属 MIST 团队,
-遵循其发布条款。
+遵循其发布条款。Hipparcos 原始数据属 ESA;hip2000 转换工作为 public domain。

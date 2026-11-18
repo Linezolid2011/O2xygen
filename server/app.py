@@ -49,7 +49,8 @@ from o2xygen.temperature import equilibrium_temperature
 from o2xygen.nbody import IntegrateBudgetExceeded
 from o2xygen import mass_radius, structure as struct_mod
 from o2xygen import world as world_mod
-from o2xygen.astroframe import normalize_astro_frame, position_radec
+from o2xygen.astroframe import (normalize_astro_frame, position_radec,
+                                world_to_icrs_pc, julian_year, quat_rotate)
 
 WEB_DIR = ROOT / "web"
 DOCS_DIR = ROOT / "docs"
@@ -596,6 +597,60 @@ def api_save_astroframe(body):
     return api_get_astroframe()
 
 
+# ------------------------------------------------------------- sky catalog ---
+_SKY = {"catalog": None}
+
+
+def _sky_catalog():
+    if _SKY["catalog"] is None:
+        from o2xygen.sky import HipparcosSky
+        path = ROOT / ".data" / "hipparcos.npz"
+        if not path.exists():
+            raise HttpError(503, "Hipparcos catalog missing; run scripts/import_hipparcos.py")
+        _SKY["catalog"] = HipparcosSky(path)
+    return _SKY["catalog"]
+
+
+def api_get_sky(query):
+    """Real starfield for the selected body at the CURRENT sim time.
+    The catalog is advanced from J1991.25 to the world's absolute epoch,
+    reprojected for the observer's heliocentric ICRS position, then rotated
+    back into world axes for Three.js. The synthetic Sun is always included."""
+    body = (query.get("body") or [None])[0]
+    if body is not None and body not in SYSTEM.bodies:
+        raise HttpError(404, f"no body '{body}'")
+    mlim = _query_float(query, "mlim")
+    mlim = 8.0 if mlim is None else max(-5.0, min(12.0, mlim))
+    with WS.lock:                             # snapshot only; no integration
+        ps = WS.sim.sim.particles
+        idx = WS.sim._index
+        names = list(idx)
+        ms = np.array([ps[idx[n]].m for n in names])
+        pos = np.array([ps[idx[n]].xyz for n in names])
+        bcm = (ms[:, None] * pos).sum(axis=0) / ms.sum()
+        r_rel = (pos[names.index(body)] - bcm) if body is not None else np.zeros(3)
+        t_s = WS.sim.t_s
+        frame = normalize_astro_frame(SYSTEM.astro_frame)
+    observer = world_to_icrs_pc(frame, r_rel, t_s)
+    year = julian_year(frame, t_s)
+    sky = _sky_catalog().observe(observer, year, mlim)
+    dirs = quat_rotate(frame["world_to_icrs_quat_wxyz"], sky["dir_icrs"],
+                       inverse=True)
+    return {
+        "body": body, "t_days": t_s / DAY, "year": year,
+        "observer_helio_pc": [float(x) for x in observer],
+        "mlim": mlim,
+        "hip": [int(x) for x in sky["hip"]],
+        "dir_x": [float(x) for x in dirs[:, 0]],
+        "dir_y": [float(x) for x in dirs[:, 1]],
+        "dir_z": [float(x) for x in dirs[:, 2]],
+        "mag": [float(x) for x in sky["mag"]],
+        "dist_pc": [float(x) for x in sky["dist_pc"]],
+        "bv": [None if not np.isfinite(x) else float(x) for x in sky["bv"]],
+        "sun_index": sky["sun_index"],
+    }
+
+
 # ---------------------------------------------------------------- router ----
 # ------------------------------------------------------------- SSE stream ---
 # Server-driven rendering (ADR-0021): the server is the ONLY computer. The
@@ -720,6 +775,8 @@ def route_api(method: str, segs: list[str], query: dict, body: dict):
         return api_get_astroframe(), 200
     if method == "POST" and tail == ["astroframe"]:
         return api_save_astroframe(body), 200
+    if method == "GET" and tail == ["sky"]:
+        return api_get_sky(query), 200
     raise HttpError(404, "not found")
 
 

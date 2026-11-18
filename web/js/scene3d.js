@@ -55,9 +55,22 @@ export class OrbitScene {
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setClearColor(0x0a0c11, 1);
+    this.renderer.autoClear = false;             // sky pass, then world pass
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0a0c11);
+    // the WORLD pass must not clear the sky pass: a scene.background Color
+    // forces a color clear even with autoClear=false. Only the sky scene owns
+    // the background color; world geometry then draws over the stars.
+    this.scene.background = null;
     this.scene.fog = null;
+    // Camera-independent celestial sphere: same orientation as the main
+    // camera, but always centered on the observer - never on the fly-to
+    // camera's world-space position (no fake parallax while panning).
+    this.skyScene = new THREE.Scene();
+    this.skyScene.background = new THREE.Color(0x0a0c11);
+    this.skyCamera = new THREE.PerspectiveCamera(50, 1, 0.01, 1000);
+    this.skyPoints = null;
+    this.skyVisible = true;
 
     this.camera = new THREE.PerspectiveCamera(50, 1, AU * 0.001, AU * 4000);
     this.camera.position.set(0, AU * 1.4, AU * 2.6);
@@ -195,6 +208,76 @@ export class OrbitScene {
   _trailColor(b) {
     if (b.kind === "star") return new THREE.Color(0xd8b090);
     return new THREE.Color(0xaab3c8);
+  }
+
+  /** Replace the real Hipparcos starfield. Server supplies observer-centric
+   *  directions already rotated into world axes, apparent magnitudes and B-V. */
+  setSky(data) {
+    const n = data.hip.length;
+    const pos = new Float32Array(n * 3);
+    const mag = new Float32Array(n);
+    const col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = data.dir_x[i] * 100;
+      pos[i * 3 + 1] = data.dir_y[i] * 100;
+      pos[i * 3 + 2] = data.dir_z[i] * 100;
+      mag[i] = data.mag[i];
+      let r = 1.0, g = 0.96, b = 0.90;          // default / Sun-like
+      const bv = data.bv[i];
+      if (i !== data.sun_index && bv != null) {
+        const t = Math.max(0, Math.min(1, (bv + 0.25) / 2.0));
+        r = 0.62 + 0.38 * t;                   // blue-white -> warm
+        g = 0.72 + 0.22 * t;
+        b = 1.0 - 0.42 * t;
+      }
+      col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("aMag", new THREE.BufferAttribute(mag, 1));
+    geo.setAttribute("aColor", new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uPixelRatio: { value: this.renderer.getPixelRatio() } },
+      vertexShader: `
+        attribute float aMag;
+        attribute vec3 aColor;
+        varying float vMag;
+        varying vec3 vColor;
+        uniform float uPixelRatio;
+        void main() {
+          vMag = aMag; vColor = aColor;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          float bright = clamp(7.0 - aMag, 0.0, 10.0);
+          gl_PointSize = (1.1 + 0.48 * bright) * uPixelRatio;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        varying float vMag;
+        varying vec3 vColor;
+        void main() {
+          float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
+          if (r > 1.0) discard;
+          float alpha = smoothstep(1.0, 0.12, r);
+          float strength = clamp(1.25 - 0.10 * vMag, 0.22, 1.35);
+          gl_FragColor = vec4(vColor * strength, alpha);
+        }`,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    if (this.skyPoints) {
+      this.skyPoints.geometry.dispose();
+      this.skyPoints.material.dispose();
+      this.skyScene.remove(this.skyPoints);
+    }
+    this.skyPoints = new THREE.Points(geo, mat);
+    this.skyPoints.visible = this.skyVisible;
+    this.skyScene.add(this.skyPoints);
+    this.skyCount = n;
+    this.skyData = data;
+  }
+
+  toggleStars() {
+    this.skyVisible = !this.skyVisible;
+    if (this.skyPoints) this.skyPoints.visible = this.skyVisible;
   }
 
   /** Latest server meta snapshot (poll): star display props + fallback pose. */
@@ -574,6 +657,17 @@ export class OrbitScene {
   render() {
     this._follow();
     this.controls.update();
+    // sky pass: observer-centered celestial sphere, then the AU-scale world
+    this.renderer.clear();
+    if (this.skyVisible && this.skyPoints) {
+      this.skyCamera.position.set(0, 0, 0);
+      this.skyCamera.quaternion.copy(this.camera.quaternion);
+      this.skyCamera.fov = this.camera.fov;
+      this.skyCamera.aspect = this.camera.aspect;
+      this.skyCamera.updateProjectionMatrix();
+      this.renderer.render(this.skyScene, this.skyCamera);
+      this.renderer.clearDepth();
+    }
     this.renderer.render(this.scene, this.camera);
     this.drawLabels();
     this.drawGizmo();
