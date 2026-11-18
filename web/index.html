@@ -11,7 +11,7 @@
 { "imports": { "three": "/vendor/three.module.js" } }
 </script>
 </head>
-<body>
+<body class="mode-view">
 <div id="app">
   <!-- ======================= top bar ======================= -->
   <header id="topbar">
@@ -23,12 +23,16 @@
       </div>
       <span class="beta">BETA</span>
     </div>
+    <div id="mode-toggle" class="mode-switch" title="切换模式会取消正在进行的推演">
+      <button class="pill" data-app-mode="edit">编辑模式</button>
+      <button class="pill active" data-app-mode="view">查看模式</button>
+    </div>
     <div class="crumb">
       <span class="crumb-item">世界</span>
       <span class="crumb-sep">›</span>
       <select id="world-select" class="mini-select" title="切换世界 (.oxygen 存档)"></select>
       <button class="btn" id="btn-world-save" title="将当前世界另存为存档">另存为</button>
-      <button class="btn" id="btn-astro-frame" title="世界相对太阳系的日心 ICRS / J2000 位置">ICRS 坐标</button>
+      <button class="btn" id="btn-astro-frame" hidden title="世界相对太阳系的日心 ICRS / J2000 位置">ICRS 坐标</button>
       <span class="crumb-sep">›</span>
       <span class="crumb-item active" id="ws-name">白玫瑰</span>
     </div>

@@ -56,6 +56,12 @@ body {
 .crumb-item.active { color: var(--accent); }
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .saved-hint { font-size: 11px; color: var(--text-faint); }
+.mode-switch {
+  flex: none; display: flex; gap: 3px; padding: 3px; border-radius: 9px;
+  background: var(--bg-elev); border: 1px solid var(--border-soft);
+}
+.mode-switch .pill { white-space: nowrap; }
+#btn-astro-frame[hidden] { display: none; }
 
 /* ---------------- buttons ---------------- */
 .btn {
@@ -77,7 +83,8 @@ body {
 /* ---------------- main layout ---------------- */
 #main { flex: 1; display: flex; min-height: 0; }
 
-/* sidebar */
+/* sidebar / edit mode: catalog remains, right inspection panel is hidden */
+.mode-edit #panel { display: none; }
 #sidebar {
   width: 240px; flex: none; background: var(--bg-panel); border-right: 1px solid var(--border-soft);
   display: flex; flex-direction: column; padding: 12px 10px; gap: 10px;

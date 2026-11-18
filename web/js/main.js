@@ -2,7 +2,7 @@
 import { api, errDetail } from "./api.js";
 import { OrbitScene } from "./scene3d.js";
 import { buildCatalog } from "./catalog.js";
-import { initPanels, showBody, onTimeChanged } from "./panels.js";
+import { initPanels, showBody, onTimeChanged, setPanelMode } from "./panels.js";
 import { initTimeline } from "./timeline.js";
 
 const $ = (s) => document.querySelector(s);
@@ -65,6 +65,7 @@ async function boot() {
   let currentDays = 0;          // latest server sim time (authoritative)
   let evolving = false;
   let streamLive = false;
+  let appMode = "view";         // default on every boot; never persisted
 
   // Time ONLY moves via 推演 (user spec 2026-11-15): in idle mode the
   // timeline is inert (NaN ticks, dead play button); during evolution the
@@ -101,7 +102,7 @@ async function boot() {
   let lastEvolveWatchdog = 0;
   async function pollState() {
     try {
-      if (!evolving && performance.now() - lastEvolveWatchdog > 3000) {
+      if (appMode === "view" && !evolving && performance.now() - lastEvolveWatchdog > 3000) {
         lastEvolveWatchdog = performance.now();
         try {
           const st = await api.evolveStatus();
@@ -201,7 +202,7 @@ async function boot() {
   function setEvolveButton(state) {
     evBtn.classList.toggle("danger", state === "paused");
     evBtn.textContent = state === "paused" ? "✕ 取消推演" : "⏩ 推演";
-    evBtn.disabled = state === "running";
+    evBtn.disabled = state === "running" || appMode !== "view";
   }
 
   function lockWorldUI(on) {
@@ -212,6 +213,7 @@ async function boot() {
   }
 
   evBtn.addEventListener("click", async () => {
+    if (appMode !== "view") return;
     if (evolving) {
       // only reachable while PAUSED (running state greys the button out)
       if (!confirm("彻底取消推演?\n\n将回退到上次自动存档(约 0.5 秒内),此后无法恢复。")) return;
@@ -237,6 +239,7 @@ async function boot() {
   });
 
   function beginEvolutionUI(st) {
+    if (appMode !== "view") return;
     evolving = true;
     lockWorldUI(true);
     timeline.setEvolve(st.end_days - st.start_days, st.speed);
@@ -307,6 +310,7 @@ async function boot() {
   const afStatus = $("#astro-frame-status");
   let afState = null;
   $("#btn-astro-frame").addEventListener("click", async () => {
+    if (appMode !== "edit") return;
     afStatus.textContent = "";
     try {
       const [frame, ev] = await Promise.all([api.astroFrame(), api.evolveStatus()]);
@@ -324,6 +328,7 @@ async function boot() {
   });
   $("#astro-frame-close").addEventListener("click", () => { afModal.hidden = true; });
   $("#astro-frame-save").addEventListener("click", async () => {
+    if (appMode !== "edit") return;
     try {
       let ra = parseFloat($("#af-ra").value);
       const dec = parseFloat($("#af-dec").value);
@@ -346,6 +351,40 @@ async function boot() {
       afModal.hidden = true;
     } catch (e) { afStatus.textContent = e.message; }
   });
+
+  // ---------------- view / edit mode ----------------
+  const modeButtons = [...document.querySelectorAll("#mode-toggle .pill")];
+  async function setAppMode(next) {
+    if (next === appMode) return;
+    modeButtons.forEach((b) => { b.disabled = true; });
+    try {
+      // A mode switch ALWAYS cancels an active job, even if it was started
+      // in another tab. Server rule: pause first, then cancel + rollback.
+      const st = await api.evolveStatus();
+      if (st.state === "running") await api.evolvePause();
+      if (st.state === "running" || st.state === "paused") {
+        await api.evolveCancel();
+      }
+      clearInterval(evTimer);
+      evolving = false;
+      timeline.setIdle();
+      lockWorldUI(false);
+      appMode = next;
+      document.body.classList.toggle("mode-view", next === "view");
+      document.body.classList.toggle("mode-edit", next === "edit");
+      modeButtons.forEach((b) => b.classList.toggle("active", b.dataset.appMode === next));
+      $("#btn-astro-frame").hidden = next !== "edit";
+      afModal.hidden = true;
+      evModal.hidden = true;
+      setPanelMode(next);
+      setEvolveButton("idle");       // edit mode: disabled by appMode
+    } catch (e) {
+      alert(`切换模式失败:${e.message}`);
+    } finally {
+      modeButtons.forEach((b) => { b.disabled = false; });
+    }
+  }
+  modeButtons.forEach((b) => b.addEventListener("click", () => setAppMode(b.dataset.appMode)));
 
   // ---------------- pipeline modal ----------------
   const modal = $("#pipeline-modal");
