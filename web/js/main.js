@@ -205,7 +205,7 @@ async function boot() {
   }
 
   function lockWorldUI(on) {
-    for (const id of ["world-select", "btn-world-save", "btn-astro-frame", "btn-pipeline"]) {
+    for (const id of ["world-select", "btn-world-save", "btn-pipeline"]) {
       const el = document.getElementById(id);
       if (el) el.disabled = on;
     }
@@ -309,7 +309,11 @@ async function boot() {
   $("#btn-astro-frame").addEventListener("click", async () => {
     afStatus.textContent = "";
     try {
-      afState = await api.astroFrame();
+      const [frame, ev] = await Promise.all([api.astroFrame(), api.evolveStatus()]);
+      afState = frame;
+      // viewing astrometry is always allowed; only saving is blocked while
+      // an evolution job is active (the server enforces the same rule)
+      $("#astro-frame-save").disabled = ["running", "paused"].includes(ev.state);
       const sp = afState.position_radec ?? { ra_deg: 0, dec_deg: 0, distance_pc: 0 };
       $("#af-ra").value = sp.ra_deg;
       $("#af-dec").value = sp.dec_deg;
