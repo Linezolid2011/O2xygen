@@ -10,6 +10,11 @@ Schema v1:
   "version": 1,
   "name": "...",
   "origin": "<body name> or null",       # metadata only (ADR-0022)
+  "astro_frame": {                       # fixed heliocentric ICRS placement
+    "position_j2000_pc": [x,y,z],
+    "epoch_jd_tt": 2451545.0,             # absolute date of world t=0
+    "world_to_icrs_quat_wxyz": [w,x,y,z]
+  },
   "bodies": [
     {"name", "kind": "star"|"body",
      "mass_kg",                          # star: INITIAL mass (MIST seed)
@@ -37,6 +42,7 @@ from pathlib import Path
 
 from .constants import M_SUN
 from .system import System, Body, STAR, BODY
+from .astroframe import normalize_astro_frame
 
 FORMAT = "o2xygen-world"
 VERSION = 1
@@ -90,7 +96,8 @@ def system_to_dict(system: System) -> dict:
             d["extra"] = _json_safe(b.extra)
         bodies.append(d)
     return {"format": FORMAT, "version": VERSION, "name": system.name,
-            "origin": system.origin, "bodies": bodies}
+            "origin": system.origin, "bodies": bodies,
+            "astro_frame": normalize_astro_frame(system.astro_frame)}
 
 
 def save_world(system: System, path: str | Path) -> Path:
@@ -108,6 +115,7 @@ def dict_to_system(d: dict) -> System:
     if int(d.get("version", 0)) > VERSION:
         raise ValueError(f"world version {d['version']} > supported {VERSION}")
     system = System(d["name"], origin=d.get("origin"))
+    system.astro_frame = normalize_astro_frame(d.get("astro_frame"))
     for bd in d["bodies"]:
         kind = bd["kind"]
         if kind not in (STAR, BODY):

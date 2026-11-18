@@ -186,7 +186,7 @@ async function boot() {
   }
 
   function lockWorldUI(on) {
-    for (const id of ["world-select", "btn-world-save", "btn-pipeline"]) {
+    for (const id of ["world-select", "btn-world-save", "btn-astro-frame", "btn-pipeline"]) {
       const el = document.getElementById(id);
       if (el) el.disabled = on;
     }
@@ -282,6 +282,46 @@ async function boot() {
       }, 10_000);
     }
   }).catch(() => {});
+
+  // ---------------- ICRS / J2000 world position (no starfield yet) ----------------
+  const afModal = $("#astro-frame-modal");
+  const afStatus = $("#astro-frame-status");
+  let afState = null;
+  $("#btn-astro-frame").addEventListener("click", async () => {
+    afStatus.textContent = "";
+    try {
+      afState = await api.astroFrame();
+      const sp = afState.position_radec ?? { ra_deg: 0, dec_deg: 0, distance_pc: 0 };
+      $("#af-ra").value = sp.ra_deg;
+      $("#af-dec").value = sp.dec_deg;
+      $("#af-distance").value = sp.distance_pc;
+      $("#af-epoch").value = afState.epoch_jd_tt;
+      afModal.hidden = false;
+    } catch (e) { alert(e.message); }
+  });
+  $("#astro-frame-close").addEventListener("click", () => { afModal.hidden = true; });
+  $("#astro-frame-save").addEventListener("click", async () => {
+    try {
+      let ra = parseFloat($("#af-ra").value);
+      const dec = parseFloat($("#af-dec").value);
+      const dist = parseFloat($("#af-distance").value);
+      const epoch = parseFloat($("#af-epoch").value);
+      if (![ra, dec, dist, epoch].every(Number.isFinite) ||
+          dec < -90 || dec > 90 || dist < 0) {
+        afStatus.textContent = "请输入有限坐标；赤纬须为 −90…90°，距离非负";
+        return;
+      }
+      ra = ((ra % 360) + 360) % 360;
+      const a = ra * Math.PI / 180, d = dec * Math.PI / 180;
+      const position = [dist * Math.cos(d) * Math.cos(a),
+                        dist * Math.cos(d) * Math.sin(a), dist * Math.sin(d)];
+      afState = await api.astroFrameSave({
+        ...afState, position_j2000_pc: position, epoch_jd_tt: epoch,
+      });
+      system.astro_frame = afState;
+      afModal.hidden = true;
+    } catch (e) { afStatus.textContent = e.message; }
+  });
 
   // ---------------- pipeline modal ----------------
   const modal = $("#pipeline-modal");

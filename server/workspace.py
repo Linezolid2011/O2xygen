@@ -539,6 +539,10 @@ class Workspace:
             states = self.sim.live_state()
             spins = self._spin_map(self.sim.t_s)
             out = System(self.system.name, origin=self.system.origin)
+            # the save becomes a new t=0: advance the absolute astronomical
+            # epoch too, or a reload would silently reset any future sky catalog
+            from o2xygen.astroframe import advance_epoch
+            out.astro_frame = advance_epoch(self.system.astro_frame, self.sim.t_s)
             age_shift_gyr = self.sim.t_s / _YEAR / 1e9        # YEARS -> GYRS
             for n, b in self.system.bodies.items():
                 extra = dict(b.extra)

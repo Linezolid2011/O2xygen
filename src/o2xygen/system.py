@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 import numpy as np
 
+from .astroframe import default_astro_frame
+
 STAR, BODY = "star", "body"
 
 
@@ -71,9 +73,10 @@ class System:
 
     def __init__(self, name: str = "", origin: Optional[str] = None):
         self.name = name
-        self.origin = origin                     # display/frame reference body
+        self.origin = origin                     # legacy metadata only (ADR-0022)
         self.bodies: dict[str, Body] = {}
         self.epoch_s = 0.0
+        self.astro_frame = default_astro_frame()  # heliocentric ICRS/J2000 placement
 
     def add(self, body: Body) -> None:
         if body.name in self.bodies:

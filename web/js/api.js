@@ -43,6 +43,8 @@ export const api = {
   worlds: () => jget("/api/worlds"),
   worldLoad: (name) => jpost("/api/world/load", { name }),
   worldSave: (name) => jpost("/api/world/save", { name }),
+  astroFrame: () => jget("/api/astroframe"),
+  astroFrameSave: (req) => jpost("/api/astroframe", req),
   evolveStart: (durationDays, speedDps) =>
     jpost("/api/evolve/start", { duration_days: durationDays, speed_days_per_s: speedDps }),
   evolvePause: () => jpost("/api/evolve/pause", {}),

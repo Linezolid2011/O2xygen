@@ -49,6 +49,7 @@ from o2xygen.temperature import equilibrium_temperature
 from o2xygen.nbody import IntegrateBudgetExceeded
 from o2xygen import mass_radius, structure as struct_mod
 from o2xygen import world as world_mod
+from o2xygen.astroframe import normalize_astro_frame, position_radec
 
 WEB_DIR = ROOT / "web"
 DOCS_DIR = ROOT / "docs"
@@ -572,6 +573,29 @@ def api_world_save(body):
     return {"ok": True, "world": path.stem}
 
 
+# ------------------------------------------------------------- astro frame ---
+def api_get_astroframe():
+    f = normalize_astro_frame(SYSTEM.astro_frame)
+    return {**f,
+            "current_jd_tt": f["epoch_jd_tt"] + WS.sim.t_s / DAY,
+            "position_radec": position_radec(f)}
+
+
+def api_save_astroframe(body):
+    if _evolution_active():
+        raise HttpError(409, "推演进行中,不能修改世界天文坐标")
+    try:
+        f = normalize_astro_frame(body)
+    except (TypeError, ValueError) as e:
+        raise HttpError(400, str(e))
+    SYSTEM.astro_frame = f
+    WS.system.astro_frame = f
+    # metadata edits are persisted with the same epoch-consistent snapshot
+    # semantics as 另存为/autosave; this also advances epoch_jd_tt correctly
+    world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
+    return api_get_astroframe()
+
+
 # ---------------------------------------------------------------- router ----
 # ------------------------------------------------------------- SSE stream ---
 # Server-driven rendering (ADR-0021): the server is the ONLY computer. The
@@ -692,6 +716,10 @@ def route_api(method: str, segs: list[str], query: dict, body: dict):
         return api_world_load(body), 200
     if method == "POST" and tail == ["world", "save"]:
         return api_world_save(body), 200
+    if method == "GET" and tail == ["astroframe"]:
+        return api_get_astroframe(), 200
+    if method == "POST" and tail == ["astroframe"]:
+        return api_save_astroframe(body), 200
     raise HttpError(404, "not found")
 
 

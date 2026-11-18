@@ -28,6 +28,7 @@
       <span class="crumb-sep">›</span>
       <select id="world-select" class="mini-select" title="切换世界 (.oxygen 存档)"></select>
       <button class="btn" id="btn-world-save" title="将当前世界另存为存档">另存为</button>
+      <button class="btn" id="btn-astro-frame" title="世界相对太阳系的日心 ICRS / J2000 位置">ICRS 坐标</button>
       <span class="crumb-sep">›</span>
       <span class="crumb-item active" id="ws-name">白玫瑰</span>
     </div>
@@ -152,6 +153,31 @@
     <div class="modal-foot">
       <button class="btn accent" id="evolve-start">开始推演</button>
       <span id="evolve-err" class="err"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= astronomical frame modal ======================= -->
+<div class="modal-mask" id="astro-frame-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-eyebrow">O2XYGEN ASTROMETRIC FRAME</div>
+        <h3>世界相对太阳系的位置</h3>
+      </div>
+      <button class="icon-btn" id="astro-frame-close">✕</button>
+    </div>
+    <p class="modal-note">日心 ICRS；位置固定于 J2000 历元。这里只设置世界位置与
+    时间锚，不接入星场。朝向以四元数保存在存档中，当前暂不开放编辑。</p>
+    <div class="form-grid">
+      <label>J2000 赤经 (°)<input id="af-ra" type="number" step="any" value="0"></label>
+      <label>J2000 赤纬 (°)<input id="af-dec" type="number" step="any" value="0"></label>
+      <label>距离 (pc)<input id="af-distance" type="number" min="0" step="any" value="0"></label>
+      <label>世界 t=0 历元 (JD TT)<input id="af-epoch" type="number" step="any" value="2451545"></label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn accent" id="astro-frame-save">保存坐标</button>
+      <span id="astro-frame-status" class="err"></span>
     </div>
   </div>
 </div>
