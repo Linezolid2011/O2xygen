@@ -2,8 +2,9 @@
 
 Adapted from the user's skycalc prototype, reduced to the numerical core. Raw
 positions are J1991.25; proper motion is linearly propagated with RV=0. The
-Sun is not a Hipparcos entry, so a synthetic Sun is always appended for any
-observer not coincident with it (even when fainter than the chosen cutoff).
+Sun is not a Hipparcos entry, so a synthetic Sun is appended for any observer
+not coincident with it, but ONLY if it passes the same magnitude cutoff as
+every other star.
 """
 from __future__ import annotations
 
@@ -56,14 +57,15 @@ class HipparcosSky:
         out = {"hip": self.hip[idx].copy(), "dir_icrs": dirs,
                "mag": mag[idx].copy(), "dist_pc": dist[idx].copy(),
                "bv": self.bv[idx].copy(), "sun_index": None}
-        # The Sun is scientifically necessary but absent from Hipparcos.
-        # Keep it even beyond mlim so the world can always locate Sol.
+        # The Sun is absent from Hipparcos, so add it as a synthetic entry -
+        # with NO special visibility: the same magnitude cutoff applies.
         d_sun = float(np.linalg.norm(observer))
-        if d_sun > 1e-12:
+        sun_mag = SUN_ABS_VMAG + 5.0 * np.log10(d_sun / 10.0) \
+            if d_sun > 0.0 else np.inf
+        if d_sun > 1e-12 and sun_mag <= float(mlim):
             out["hip"] = np.append(out["hip"], 0)
             out["dir_icrs"] = np.vstack([out["dir_icrs"], -observer / d_sun])
-            out["mag"] = np.append(out["mag"],
-                                   SUN_ABS_VMAG + 5.0 * np.log10(d_sun / 10.0))
+            out["mag"] = np.append(out["mag"], sun_mag)
             out["dist_pc"] = np.append(out["dist_pc"], d_sun)
             out["bv"] = np.append(out["bv"], SUN_BV)
             out["sun_index"] = len(out["hip"]) - 1

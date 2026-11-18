@@ -615,7 +615,8 @@ def api_get_sky(query):
     """Real starfield for the selected body at the CURRENT sim time.
     The catalog is advanced from J1991.25 to the world's absolute epoch,
     reprojected for the observer's heliocentric ICRS position, then rotated
-    back into world axes for Three.js. The synthetic Sun is always included."""
+    back into world axes for Three.js. The synthetic Sun obeys the same
+    magnitude cutoff as every catalog star."""
     body = (query.get("body") or [None])[0]
     if body is not None and body not in SYSTEM.bodies:
         raise HttpError(404, f"no body '{body}'")

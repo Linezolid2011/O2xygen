@@ -27,8 +27,11 @@ def test_sirius_j2000_anchor(sky):
     assert got["mag"][i] == pytest.approx(-1.46, abs=0.1)
 
 
-def test_sun_is_always_included_with_correct_direction_and_magnitude(sky):
-    got = sky.observe((100.0, 0.0, 0.0), 2000.0, mlim=-5.0)
+def test_sun_obeys_the_same_magnitude_cutoff(sky):
+    # At 100 pc the Sun is V=9.83: hidden at mlim=9, visible at mlim=10.
+    hidden = sky.observe((100.0, 0.0, 0.0), 2000.0, mlim=9.0)
+    assert hidden["sun_index"] is None
+    got = sky.observe((100.0, 0.0, 0.0), 2000.0, mlim=10.0)
     i = got["sun_index"]
     assert i is not None and got["hip"][i] == 0
     assert np.allclose(got["dir_icrs"][i], [-1.0, 0.0, 0.0], atol=1e-15)
