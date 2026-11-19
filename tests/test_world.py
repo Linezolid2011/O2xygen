@@ -34,11 +34,13 @@ def test_round_trip(tmp_path):
         assert rb.mass_kg == pytest.approx(b.mass_kg, rel=1e-12)
         assert np.allclose(rb.pos0, b.pos0, rtol=0, atol=1e-3)
         assert np.allclose(rb.vel0, b.vel0, rtol=0, atol=1e-9)
-        assert rb.radius_m == pytest.approx(b.radius_m, rel=1e-12)
         if b.kind == STAR:
+            # stars persist MIST inputs only; radius is a runtime output
+            assert rb.radius_m == 0.0
             assert rb.extra["feh"] == pytest.approx(b.extra["feh"])
             assert rb.extra["age0_gyr"] == pytest.approx(b.extra["age0_gyr"])
         else:
+            assert rb.radius_m == pytest.approx(b.radius_m, rel=1e-12)
             assert rb.albedo == pytest.approx(b.albedo)
 
 
@@ -101,6 +103,6 @@ def test_extra_metadata_round_trips(tmp_path):
     assert b1.extra["composition_preset"] == "硅酸盐 + 铁核"
     assert b1.extra["atm"]["gases"][0] == ["二氧化碳 CO₂", 91.3]
     assert b1.extra["atm"]["tau0"] == pytest.approx(0.32)
-    # star extras survive, but the schema fields stay authoritative
-    assert back.bodies["S1"].extra["teff_k"] == pytest.approx(6474.11)
+    # MIST outputs are not duplicated in the save's extra payload
+    assert "teff_k" not in back.bodies["S1"].extra
     assert back.bodies["S1"].extra["age0_gyr"] == pytest.approx(1.26)

@@ -55,22 +55,12 @@ class Workspace:
 
     # ------------------------------------------------------ internal helpers
     def _star_props_at(self, t_s: float) -> dict[str, dict]:
-        """Stellar properties at sim time t_s. MIST evolves normal stars;
-        genuinely off-grid static objects (e.g. white dwarfs) bypass it."""
+        """Stellar properties at sim time t_s, computed from MIST inputs.
+        Off-grid inputs are approximated at the nearest covered grid point;
+        no static/per-star output copy is stored or consulted."""
         out = {}
         grid = self._grid_getter() if self._grid_getter else None
         for s in self.system.stars():
-            if s.extra.get("evolution_model") == "static":
-                # genuinely off-grid objects (e.g. the white dwarf) have no
-                # MIST track; their properties are static but NOT editable
-                # as MIST outputs in the editor
-                out[s.name] = {
-                    "mass_kg": float(s.mass_kg),
-                    "luminosity_w": float(s.luminosity_w),
-                    "radius_m": float(s.radius_m),
-                    "teff_k": float(s.extra.get("teff_k", 5772.0)),
-                }
-                continue
             if grid is None:
                 continue
             # ADR-0016 schema: the stored mass IS the initial mass (MIST seed)

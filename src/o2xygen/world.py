@@ -17,13 +17,13 @@ Schema v1:
   },
   "bodies": [
     {"name", "kind": "star"|"body",
-     "mass_kg",                          # star: INITIAL mass (MIST seed)
+     "mass_kg" (non-star only),
      "pos0_m": [x,y,z], "vel0_m": [x,y,z],
      "spin_axis": [x,y,z],               # unit vector, inertial frame
      "spin_rate_rad_s": |omega|,         # angular speed at the epoch
      "spin_phase_rad": phase,            # rotation phase at the epoch
-     # star only:
-     "radius_m": <initial radius>, "feh": ..., "age0_gyr": ...,
+     # star only (MIST inputs, nothing derived):
+     "mini_msun": ..., "feh": ..., "age0_gyr": ...,
      # non-star only:
      "radius_m": ..., "albedo": ...,
      # both kinds:
@@ -85,19 +85,27 @@ def system_to_dict(system: System) -> dict:
             "spin_phase_rad": float(b.spin_phase_rad),
         }
         if b.kind == STAR:
+            # ONLY MIST inputs are persisted. Current mass/radius/luminosity/
+            # Teff are runtime outputs and must never become a second truth.
+            d.pop("mass_kg", None)
+            d.pop("radius_m", None)
+            d["mini_msun"] = float(b.extra.get("mini_msun", b.mass_kg / M_SUN))
             d["feh"] = float(b.extra.get("feh", 0.0))
             d["age0_gyr"] = float(b.extra.get("age0_gyr", 1.0))
         else:
             d["albedo"] = float(b.albedo)
         if b.extra:
-            # free-form metadata (cmf, ring, atmosphere, placement stamps);
-            # losing these on save once silently wiped a world's pipeline
-            # inputs and ring flags (2026-11-16 audit)
-            d["extra"] = _json_safe(b.extra)
-        if b.kind == STAR:
-            # luminosity_w is a runtime Body field; carry it in extra so
-            # manual/off-grid stars cannot reload dark (MIST stars re-settle)
-            d.setdefault("extra", {})["luminosity_w"] = float(b.luminosity_w)
+            # free-form NON-MIST metadata only (tides, rings, atm, notes)
+            extra = b.extra
+            if b.kind == STAR:
+                derived = {"mini_msun", "feh", "age0_gyr", "teff_k",
+                           "luminosity_w", "evolution_model", "manual_override",
+                           "manual_mass_kg"}
+                extra = {k: v for k, v in b.extra.items() if k not in derived}
+            if extra:
+                d["extra"] = _json_safe(extra)
+            else:
+                d.pop("extra", None)
         bodies.append(d)
     return {"format": FORMAT, "version": VERSION, "name": system.name,
             "origin": system.origin, "bodies": bodies,
@@ -131,27 +139,30 @@ def dict_to_system(d: dict) -> System:
         if kind == STAR:
             extra["feh"] = float(bd.get("feh", 0.0))
             extra["age0_gyr"] = float(bd.get("age0_gyr", 1.0))
-            # the stored mass IS the initial mass: pin the MIST seed so later
-            # wind evolution can never corrupt it across save/load cycles
-            extra["mini_msun"] = float(bd["mass_kg"]) / M_SUN
+            # the only persisted mass is the MIST INITIAL-mass seed
+            mini = float(bd.get("mini_msun",
+                                float(bd.get("mass_kg", M_SUN)) / M_SUN))
+            extra["mini_msun"] = mini
+            mass_kg = mini * M_SUN
+            radius_m = 0.0                    # computed lazily from MIST
+            luminosity_w = 0.0                # never loaded as a second truth
         else:
             albedo = float(bd.get("albedo", 0.0))
+            mass_kg = float(bd["mass_kg"])
+            radius_m = float(bd.get("radius_m", 0.0))
+            luminosity_w = 0.0
         system.add(Body(
             bd["name"], kind,
-            mass_kg=float(bd["mass_kg"]),
+            mass_kg=mass_kg,
             pos0=np.array(bd["pos0_m"], dtype=float),
             vel0=np.array(bd["vel0_m"], dtype=float),
-            radius_m=float(bd.get("radius_m", 0.0)),
+            radius_m=radius_m,
             albedo=albedo,
             rotation_period_s=bd.get("rotation_period_s"),  # legacy fallback
             spin_axis=np.array(bd.get("spin_axis", [0.0, 0.0, 1.0]), dtype=float),
             spin_rate_rad_s=bd.get("spin_rate_rad_s"),
             spin_phase_rad=float(bd.get("spin_phase_rad", 0.0)),
-            # off-grid stars (e.g. white dwarfs: no MIST tracks) carry a
-            # hand-specified luminosity in extra - honour it on load or a
-            # reload would freeze them dark (MIST stars are re-settled at
-            # boot anyway, so this only ever matters off-grid)
-            luminosity_w=float(extra.get("luminosity_w", 0.0)) if kind == STAR else 0.0,
+            luminosity_w=luminosity_w,
             extra=extra,
         ))
     return system

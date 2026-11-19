@@ -376,7 +376,8 @@ def api_star_estimate(body):
 def api_star_edit(body):
     """Save a stellar draft from edit mode. Only MIST inputs (initial mass,
     Fe/H, epoch age) and spin are editable. Current mass/radius/luminosity/
-    Teff are MIST OUTPUTS and are never accepted as editable inputs.
+    Teff are MIST OUTPUTS and are never accepted as editable inputs. Off-grid
+    inputs are clamped to the nearest covered point by MistGrid.
     Position/velocity remain immutable."""
     if _evolution_active():
         raise HttpError(409, "推演进行中,不能编辑恒星")
@@ -410,21 +411,19 @@ def api_star_edit(body):
         b.extra["mini_msun"] = mini
         b.extra["feh"] = feh
         b.extra["age0_gyr"] = age0
-        if b.extra.get("evolution_model") != "static":
-            grid = _grid_getter()
-            if grid is None:
-                raise HttpError(503, "MIST 网格尚未就绪")
-            try:
-                p = grid.evaluate(mini, feh,
-                                  age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
-            except ValueError as e:
-                raise HttpError(400, str(e))
-            # current properties are always computed, never user-supplied
-            b.mass_kg = p.mass_msun * M_SUN
-            b.radius_m = p.radius_m
-            b.luminosity_w = p.luminosity_w
-            b.extra["teff_k"] = p.teff_k
-        # static off-grid stars (WD) keep their existing physical properties
+        grid = _grid_getter()
+        if grid is None:
+            raise HttpError(503, "MIST 网格尚未就绪")
+        try:
+            p = grid.evaluate(mini, feh,
+                              age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
+        except ValueError as e:
+            raise HttpError(400, str(e))
+        # current properties are always computed, never user-supplied
+        b.mass_kg = p.mass_msun * M_SUN
+        b.radius_m = p.radius_m
+        b.luminosity_w = p.luminosity_w
+        b.extra["teff_k"] = p.teff_k
         b.extra["luminosity_w"] = b.luminosity_w
         b.set_spin_vector(axis * rate, b.spin_phase_rad)
         WS.sim.update_masses({name: b.mass_kg})

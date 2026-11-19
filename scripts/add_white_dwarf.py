@@ -56,11 +56,9 @@ def main(path: Path) -> None:
                radius_m=R_WD, luminosity_w=L_WD,
                extra={"teff_k": TEFF, "mini_msun": 1.2, "feh": 0.0,
                       "age0_gyr": 15.0, "luminosity_w": L_WD,
-                      "evolution_model": "static",
                       "love_k2": 1.0e-4, "tidal_dt_s": 100.0,
                       "inertia_factor": 0.08,
-                      "note": "white dwarf - no MIST tracks; age0 kept "
-                              "off-grid so engine props stay static"}))
+                      "note": "off-grid inputs are approximated at the nearest MIST point"}))
     # barycentric recoil: Vesper's motion around the pair barycenter
     vesper.pos0 = vesper.pos0 - r_rel * (M_WD / m_tot)
     vesper.vel0 = vesper.vel0 - v_rel * (M_WD / m_tot)

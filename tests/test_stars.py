@@ -74,15 +74,14 @@ def test_solar_age_sun(grid):
     assert p.radius_m == pytest.approx(6.957e8, rel=0.05)
 
 
-def test_evaluate_rejects_off_grid_inputs(grid):
-    """Audit findings A3/B8: absurd initial mass silently returned degenerate
-    track-end values; negative age was silently clipped to 1 Myr. Both must
-    raise now, mirroring the [Fe/H] check."""
-    with pytest.raises(ValueError):
-        grid.evaluate(1.0e6, 0.0, 4.0e9)      # mass far above grid max
-    with pytest.raises(ValueError):
-        grid.evaluate(0.01, 0.0, 4.0e9)       # mass below grid minimum (~0.1)
-    with pytest.raises(ValueError):
-        grid.evaluate(1.0, 0.0, -5.0)         # negative age (was clipped)
-    with pytest.raises(ValueError):
-        grid.evaluate(1.0, 0.0, 1.0e12)       # far above AGE_MAX (was clipped)
+def test_evaluate_clamps_off_grid_inputs_to_nearest_grid_point(grid):
+    """User policy (2026-11-19): off-grid stars are approximated at the
+    nearest covered grid point, never persisted as separate static props."""
+    hi = grid._mini_ranges[0.0][1]
+    lo = grid._mini_ranges[0.0][0]
+    assert grid.evaluate(1.0e6, 0.0, 4.0e9) == grid.evaluate(hi, 0.0, 4.0e9)
+    assert grid.evaluate(0.01, 0.0, 4.0e9) == grid.evaluate(lo, 0.0, 4.0e9)
+    assert grid.evaluate(1.0, 0.0, -5.0) == grid.evaluate(1.0, 0.0, 1.0e6)
+    assert grid.evaluate(1.0, 0.0, 1.0e12) == grid.evaluate(1.0, 0.0, 1.4e10)
+    assert grid.evaluate(1.0, -5.0, 4.56e9) == grid.evaluate(1.0, 0.0, 4.56e9)
+    assert grid.evaluate(1.0, 99.0, 4.56e9) == grid.evaluate(1.0, 0.25, 4.56e9)

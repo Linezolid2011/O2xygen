@@ -328,7 +328,7 @@ export class OrbitScene {
     for (const b of this.system.bodies) {
       if (b.kind !== "star") continue;
       const st = snap.stars[b.name];
-      if (!st) continue;
+      if (!st || !(st.radius_m > 0) || !Number.isFinite(st.radius_m)) continue;
       const base = this._starBase[b.name] ?? (this._starBase[b.name] = st.radius_m);
       const g = this.bodyGroups[b.name];
       if (g) g.scale.setScalar(Math.max(st.radius_m / base, 1e-3));

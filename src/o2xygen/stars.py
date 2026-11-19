@@ -124,35 +124,43 @@ class MistGrid:
                 for k in self._FIELDS:
                     use_v[k].append(np.interp(logage, logages, entry[k]))
         if not use_m:
-            raise ValueError(f"age {10**logage:.3g} yr outside track coverage at [Fe/H]={feh}")
+            # Off-grid policy (ADR-0026): approximate at the nearest covered
+            # track endpoint instead of storing fabricated static properties.
+            # Pick the closest initial-mass track, then clamp age to its range.
+            k = min(range(len(table)),
+                    key=lambda j: (abs(minis[j] - mini),
+                                   min(abs(logage - table[j][0][0]),
+                                       abs(logage - table[j][0][-1]))))
+            logages = table[k][0]
+            logage = float(np.clip(logage, logages[0], logages[-1]))
+            return self._at_feh(feh, mini, logage)
+        # At ages where only a subset of tracks survives, clamp mass to the
+        # covered range (nearest grid point) rather than extrapolating.
+        mini_eval = float(np.clip(mini, use_m[0], use_m[-1]))
         if len(use_m) == 1:
             return np.array([use_v[k][0] for k in self._FIELDS])
-        # np.interp CLAMPS outside the covered masses - at ages where only a
-        # subset of tracks survives (e.g. 13 Gyr: low masses only) that
-        # silently answers for the wrong star. Refuse instead.
-        if not (use_m[0] <= mini <= use_m[-1]):
-            raise ValueError(
-                f"M_initial={mini:.6g} outside the tracks covering age "
-                f"{10**logage:.3g} yr at [Fe/H]={feh} "
-                f"({use_m[0]:.3g}..{use_m[-1]:.3g} M_sun)")
         # exact at nodes: np.interp returns node values when x hits a node
-        return np.array([np.interp(mini, use_m, use_v[k]) for k in self._FIELDS])
+        return np.array([np.interp(mini_eval, use_m, use_v[k]) for k in self._FIELDS])
 
-    def evaluate(self, mini_msun: float, feh: float, age_yr: float) -> StarProperties:
-        if not (self.fehs[0] <= feh <= self.fehs[-1]):
-            raise ValueError(f"[Fe/H]={feh} outside loaded grid {self.fehs[0]}..{self.fehs[-1]}")
-        # validate against the ORIGINAL user value - never silently clip:
-        # a clipped age looks like it was accepted but returns a different star
-        if not (AGE_MIN <= age_yr <= AGE_MAX):
-            raise ValueError(f"age {age_yr:.6g} yr outside MIST coverage "
-                             f"[{AGE_MIN:.3g}, {AGE_MAX:.3g}]")
+    def clamp_inputs(self, mini_msun: float, feh: float,
+                     age_yr: float) -> tuple[float, float, float]:
+        """Clamp global mass/FeH/age to the loaded grid. Per-track age
+        coverage is handled by _at_feh. Non-finite inputs remain errors."""
+        if not np.all(np.isfinite([mini_msun, feh, age_yr])):
+            raise ValueError("MIST inputs must be finite")
+        feh = float(np.clip(feh, self.fehs[0], self.fehs[-1]))
         lo = max([f for f in self.fehs if f <= feh])
         hi = min([f for f in self.fehs if f >= feh])
         m_lo = min(self._mini_ranges[lo][0], self._mini_ranges[hi][0])
         m_hi = max(self._mini_ranges[lo][1], self._mini_ranges[hi][1])
-        if not (m_lo <= mini_msun <= m_hi):
-            raise ValueError(f"M_initial={mini_msun:.6g} outside loaded grid "
-                             f"{m_lo:.3g}..{m_hi:.3g} M_sun at [Fe/H] {lo}..{hi}")
+        mini = float(np.clip(mini_msun, m_lo, m_hi))
+        age = float(np.clip(age_yr, AGE_MIN, AGE_MAX))
+        return mini, feh, age
+
+    def evaluate(self, mini_msun: float, feh: float, age_yr: float) -> StarProperties:
+        mini_msun, feh, age_yr = self.clamp_inputs(mini_msun, feh, age_yr)
+        lo = max([f for f in self.fehs if f <= feh])
+        hi = min([f for f in self.fehs if f >= feh])
         logage = float(np.log10(age_yr))
         if lo == hi:
             v = self._at_feh(lo, mini_msun, logage)

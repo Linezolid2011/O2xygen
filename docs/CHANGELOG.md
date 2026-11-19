@@ -334,6 +334,20 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   pose ~50–60 Hz、trails ~4–6 Hz;Playwright 全流程烟测(启动/推演/
   暂停冻结/取消回滚)零页面错误、零 HTTP≥400。
 
+## [0.3.0-dev3] - 2026-11-19
+
+### 恒星存档单一真源(ADR-0026,用户裁定)
+
+- 恒星只保存 MIST 自变量 `mini_msun`/`feh`/`age0_gyr` 以及位置、速度、
+  自转和非 MIST 物理参数;不再保存当前质量、半径、光度、有效温度,
+  也不再把这些输出复制进 extra。
+- 当前属性在启动/演化时自动由 MIST 求值;编辑器中只读显示,
+  服务器拒绝将输出字段作为输入提交。
+- off-grid 输入由 MistGrid 钳制到最近覆盖轨迹/端点;删除静态替代属性
+  与手动覆盖路径。该近似不等于真正的遗迹冷却模型。
+- 白玫瑰存档已迁移;MIST 标定、编辑器保存/取消/重载和 off-grid 钳制
+  测试均通过。
+
 ## [0.3.0-dev2] - 2026-11-19
 
 ### 恒星编辑器(开发预览,非 Release)
@@ -446,6 +460,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 回扫成本有安全阀(单次 ≤~2000 次积分调用);窗口集合变化 >10% 时缓存
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
+[0.3.0-dev3]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev3
 [0.3.0-dev2]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev2
 [0.3.0-dev1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev1
 [0.3.0]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0
