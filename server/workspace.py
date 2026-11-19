@@ -55,12 +55,24 @@ class Workspace:
 
     # ------------------------------------------------------ internal helpers
     def _star_props_at(self, t_s: float) -> dict[str, dict]:
-        """MIST (mass, luminosity) for every evolved star at sim time t_s."""
-        grid = self._grid_getter() if self._grid_getter else None
-        if grid is None:
-            return {}
+        """Stellar properties at sim time t_s. MIST evolves normal stars;
+        genuinely off-grid static objects (e.g. white dwarfs) bypass it."""
         out = {}
+        grid = self._grid_getter() if self._grid_getter else None
         for s in self.system.stars():
+            if s.extra.get("evolution_model") == "static":
+                # genuinely off-grid objects (e.g. the white dwarf) have no
+                # MIST track; their properties are static but NOT editable
+                # as MIST outputs in the editor
+                out[s.name] = {
+                    "mass_kg": float(s.mass_kg),
+                    "luminosity_w": float(s.luminosity_w),
+                    "radius_m": float(s.radius_m),
+                    "teff_k": float(s.extra.get("teff_k", 5772.0)),
+                }
+                continue
+            if grid is None:
+                continue
             # ADR-0016 schema: the stored mass IS the initial mass (MIST seed)
             mini = s.extra.get("mini_msun", s.mass_kg / M_SUN)
             feh, age0 = s.extra.get("feh"), s.extra.get("age0_gyr")
@@ -554,6 +566,7 @@ class Workspace:
                 out.add(Body(n, b.kind, mass_kg=b.mass_kg,
                              pos0=states[n][0].copy(), vel0=states[n][1].copy(),
                              radius_m=b.radius_m, albedo=b.albedo,
+                             luminosity_w=b.luminosity_w,
                              spin_axis=axis.copy(), spin_rate_rad_s=rate,
                              spin_phase_rad=spins[n]["phase"], extra=extra))
             return out

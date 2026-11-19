@@ -33,6 +33,7 @@ def main(path: Path) -> None:
         if b.name == "Εἴδωλον":
             # centrally condensed degenerate remnant, not an n=1 main-sequence
             # star: weak tidal response and a smaller moment of inertia
+            b.extra["evolution_model"] = "static"
             b.extra["love_k2"] = 1.0e-4
             b.extra["inertia_factor"] = 0.08
     out = world_mod.save_world(w, path)

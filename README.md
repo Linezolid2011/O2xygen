@@ -41,6 +41,8 @@
   在演化中交换自转与轨道角动量(不含洛希极限与撕裂)。
 - **天文坐标**:日心 ICRS/J2000 世界位置、绝对历元与固定朝向四元数
   入档;自动存档同步推进历元(尚未接星场)。
+- **编辑模式（开发中）**:恒星草稿编辑器支持 MIST 种子与自转;当前质量/
+  半径/光度/温度由 MIST 计算并只读;保存才入档,退出不保存。
 - **温度管线**:三种平衡温度体制 + 反照率,温度表从当前时刻向前采样。
 - **WebUI**:标准库 http.server + SSE 推流 + Three.js + uPlot,无构建步骤;
   服务器驱动渲染(客户端零物理)、服务器积分烟雾轨迹、**Hipparcos
@@ -59,7 +61,7 @@ python -m venv .venv
 `http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
 测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
-测试(81 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
+测试(83 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -86,7 +88,7 @@ J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
 src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
 server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         81 项标定与积分验收测试
+tests/         83 项标定与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)

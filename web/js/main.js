@@ -136,6 +136,12 @@ async function boot() {
     catalog.select(name);
     scene.select(name);
     refreshSky();
+    if (appMode === "edit" &&
+        system.bodies.find((b) => b.name === name)?.kind === "star") {
+      openStarEditor(name);
+    } else {
+      closeStarEditor();
+    }
     await showBody(name);
   }
 
@@ -376,6 +382,7 @@ async function boot() {
       $("#btn-astro-frame").hidden = next !== "edit";
       afModal.hidden = true;
       evModal.hidden = true;
+      closeStarEditor();
       setPanelMode(next);
       setEvolveButton("idle");       // edit mode: disabled by appMode
     } catch (e) {
@@ -385,6 +392,77 @@ async function boot() {
     }
   }
   modeButtons.forEach((b) => b.addEventListener("click", () => setAppMode(b.dataset.appMode)));
+
+  // ---------------- stellar editor (edit mode, draft until save) ----------------
+  const starEditor = $("#star-editor");
+  const starEditStatus = $("#star-edit-status");
+  const starSaveBtn = $("#star-edit-save");
+  let starDraftName = null;
+
+  function closeStarEditor() {
+    starEditor.hidden = true;
+    starDraftName = null;
+    starEditStatus.textContent = "";
+  }
+  $("#star-edit-close").addEventListener("click", closeStarEditor);
+
+  async function openStarEditor(name) {
+    starDraftName = name;
+    starEditor.hidden = false;
+    starEditStatus.textContent = "正在读取恒星数据…";
+    starSaveBtn.disabled = true;
+    try {
+      const d = await api.body(name);
+      if (appMode !== "edit" || starDraftName !== name) return;
+      const b = d.body;
+      $("#star-edit-title").textContent = b.name;
+      $("#sx-mini").value = b.extra?.mini_msun ?? b.mass_kg / 1.98847e30;
+      $("#sx-mass").value = b.mass_kg / 1.98847e30;
+      $("#sx-feh").value = b.extra?.feh ?? 0.0;
+      $("#sx-age").value = b.extra?.age0_gyr ?? 1.0;
+      $("#sx-radius").value = b.radius_m / 6.957e8;
+      $("#sx-lum").value = b.luminosity_w / 3.828e26;
+      $("#sx-teff").value = b.extra?.teff_k ?? 5772;
+      $("#sx-period").value = (b.rotation_period_s ?? 0) / 3600;
+      const axis = b.spin_axis ?? [0, 0, 1];
+      $("#sx-axis-x").value = axis[0];
+      $("#sx-axis-y").value = axis[1];
+      $("#sx-axis-z").value = axis[2];
+      starEditStatus.textContent = "";
+      starSaveBtn.disabled = false;
+    } catch (e) {
+      starEditStatus.textContent = e.message;
+    }
+  }
+
+  starSaveBtn.addEventListener("click", async () => {
+    const name = starDraftName;
+    if (!name || appMode !== "edit") return;
+    const num = (id) => parseFloat(document.getElementById(id).value);
+    const payload = {
+      name,
+      mini_msun: num("sx-mini"), feh: num("sx-feh"), age0_gyr: num("sx-age"),
+      spin_period_h: num("sx-period"),
+      spin_axis: [num("sx-axis-x"), num("sx-axis-y"), num("sx-axis-z")],
+    };
+    const values = [...Object.values(payload).filter((v) => typeof v === "number"),
+                    ...payload.spin_axis];
+    if (!values.every(Number.isFinite)) {
+      starEditStatus.textContent = "所有参数必须为有效数值";
+      return;
+    }
+    starSaveBtn.disabled = true;
+    starEditStatus.textContent = "正在保存…";
+    try {
+      const r = await api.starEdit(payload);
+      const local = system.bodies.find((b) => b.name === name);
+      if (local) Object.assign(local, r.body);
+      closeStarEditor();              // only here is the draft committed
+    } catch (e) {
+      starEditStatus.textContent = e.message;
+      starSaveBtn.disabled = false;
+    }
+  });
 
   // ---------------- pipeline modal ----------------
   const modal = $("#pipeline-modal");

@@ -94,6 +94,10 @@ def system_to_dict(system: System) -> dict:
             # losing these on save once silently wiped a world's pipeline
             # inputs and ring flags (2026-11-16 audit)
             d["extra"] = _json_safe(b.extra)
+        if b.kind == STAR:
+            # luminosity_w is a runtime Body field; carry it in extra so
+            # manual/off-grid stars cannot reload dark (MIST stars re-settle)
+            d.setdefault("extra", {})["luminosity_w"] = float(b.luminosity_w)
         bodies.append(d)
     return {"format": FORMAT, "version": VERSION, "name": system.name,
             "origin": system.origin, "bodies": bodies,

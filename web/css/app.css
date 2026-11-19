@@ -280,6 +280,22 @@ input:disabled { opacity: 0.4; cursor: default; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; margin-bottom: 6px; }
 .form-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--text-dim); }
 
+/* in-viewport object editor (edit mode only) */
+.editor-overlay {
+  position: absolute; inset: 0; z-index: 20; overflow-y: auto;
+  background: var(--bg); padding: 22px 28px; color: var(--text);
+}
+.editor-overlay[hidden] { display: none; }
+.editor-head { display: flex; justify-content: space-between; align-items: flex-start;
+  max-width: 900px; margin-bottom: 12px; }
+.editor-form { max-width: 900px; margin-top: 18px; }
+.editor-form .sec-title { margin: 18px 0 10px; }
+.editor-form input { background: var(--bg-elev); border: 1px solid var(--border-soft);
+  border-radius: 7px; color: var(--text); padding: 8px 10px; font-family: var(--mono); }
+.editor-form input:disabled { opacity: .45; }
+.editor-foot { max-width: 900px; margin-top: 22px; }
+.editor-foot #star-edit-status { margin-right: auto; }
+
 /* scrollbars */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
 ::-webkit-scrollbar-thumb { background: #2c3140; border-radius: 5px; border: 2px solid var(--bg-panel); }

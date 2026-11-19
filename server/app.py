@@ -372,6 +372,70 @@ def api_star_estimate(body):
             "cumulative_loss_msun": mass_msun - p.mass_msun}, 200
 
 
+# ------------------------------------------------------------- star editor ---
+def api_star_edit(body):
+    """Save a stellar draft from edit mode. Only MIST inputs (initial mass,
+    Fe/H, epoch age) and spin are editable. Current mass/radius/luminosity/
+    Teff are MIST OUTPUTS and are never accepted as editable inputs.
+    Position/velocity remain immutable."""
+    if _evolution_active():
+        raise HttpError(409, "推演进行中,不能编辑恒星")
+    name = _body_str(body, "name", required=True)
+    b = SYSTEM.bodies.get(name)
+    if b is None:
+        raise HttpError(404, f"no body '{name}'")
+    if b.kind != STAR:
+        raise HttpError(400, "只能编辑恒星")
+    forbidden = {"mass_msun", "radius_rsun", "luminosity_lsun", "teff_k",
+                 "use_mist"} & set(body)
+    if forbidden:
+        raise HttpError(400, "当前质量/半径/光度/有效温度是 MIST 输出,只读")
+    mini = _body_float(body, "mini_msun", b.extra.get("mini_msun", b.mass_kg / M_SUN))
+    feh = _body_float(body, "feh", b.extra.get("feh", 0.0))
+    age0 = _body_float(body, "age0_gyr", b.extra.get("age0_gyr", 1.0))
+    period_h = _body_float(body, "spin_period_h",
+                           (b.rotation_period_s or 0.0) / 3600.0)
+    if not all(np.isfinite([mini, feh, age0, period_h])):
+        raise HttpError(400, "恒星参数必须为有限数值")
+    if mini <= 0 or age0 < 0 or period_h < 0:
+        raise HttpError(400, "初始质量须为正,年龄/自转周期不得为负")
+    axis = np.asarray(body.get("spin_axis", list(b.spin_axis)), dtype=float)
+    if axis.shape != (3,) or not np.all(np.isfinite(axis)) \
+            or np.linalg.norm(axis) < 1e-15:
+        raise HttpError(400, "自转轴必须为三个有限且非零的数值")
+    axis = axis / np.linalg.norm(axis)
+    rate = 2.0 * np.pi / (period_h * 3600.0) if period_h > 0.0 else 0.0
+
+    with WS.lock:
+        b.extra["mini_msun"] = mini
+        b.extra["feh"] = feh
+        b.extra["age0_gyr"] = age0
+        if b.extra.get("evolution_model") != "static":
+            grid = _grid_getter()
+            if grid is None:
+                raise HttpError(503, "MIST 网格尚未就绪")
+            try:
+                p = grid.evaluate(mini, feh,
+                                  age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
+            except ValueError as e:
+                raise HttpError(400, str(e))
+            # current properties are always computed, never user-supplied
+            b.mass_kg = p.mass_msun * M_SUN
+            b.radius_m = p.radius_m
+            b.luminosity_w = p.luminosity_w
+            b.extra["teff_k"] = p.teff_k
+        # static off-grid stars (WD) keep their existing physical properties
+        b.extra["luminosity_w"] = b.luminosity_w
+        b.set_spin_vector(axis * rate, b.spin_phase_rad)
+        WS.sim.update_masses({name: b.mass_kg})
+        # archived snapshots contain the OLD mass; never restore them
+        WS.sim._cp_times = [WS.sim.t_s]
+        WS.sim._cp_snaps = [WS.sim._snapshot()]
+        WS._trail_cache = None
+    world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
+    return {"ok": True, "body": body_json(b)}
+
+
 # ------------------------------------------------------------- pipeline -----
 def api_pipeline(body):
     """One-click solve: 结构 -> 大气/光学厚度 -> 温度表 (synchronous v1)."""
@@ -747,6 +811,8 @@ def route_api(method: str, segs: list[str], query: dict, body: dict):
             return api_star_status(), 200
         if method == "POST" and tail == ["star", "estimate"]:
             return api_star_estimate(body)
+    if method == "POST" and tail == ["star", "edit"]:
+        return api_star_edit(body), 200
     if method == "POST" and tail == ["pipeline"]:
         return api_pipeline(body), 200
     if method == "POST" and tail == ["add_body"]:
