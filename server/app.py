@@ -73,7 +73,8 @@ class HttpError(Exception):
 
 
 # ------------------------------------------------------------- MIST grid -----
-_GRID = {"grid": None, "loading": False, "error": None, "n_tracks": 0}
+_GRID = {"grid": None, "loading": False, "error": None, "n_tracks": 0,
+         "wd_grid": None, "wd_error": None, "n_wd_tracks": 0}
 
 
 def _load_grid():
@@ -98,6 +99,16 @@ def _load_grid():
                 pickle.dump(grid, f, protocol=5)
             _GRID["grid"] = grid
         _GRID["n_tracks"] = sum(len(v[0]) for v in _GRID["grid"]._tracks.values())
+        try:
+            from o2xygen.wd_mist3 import Mist3WDGrid
+            wd_path = ROOT / ".data" / "mist3_wd.npz"
+            if not wd_path.exists():
+                raise FileNotFoundError(f"no MIST III WD grid at {wd_path}")
+            _GRID["wd_grid"] = Mist3WDGrid(wd_path)
+            _GRID["n_wd_tracks"] = _GRID["wd_grid"].n_tracks
+        except Exception as e:
+            _GRID["wd_error"] = str(e)
+            log.exception("MIST III WD grid load failed")
     except Exception as e:                       # pragma: no cover
         _GRID["error"] = str(e)
         log.exception("MIST grid load failed")
@@ -151,14 +162,16 @@ def _load_system(name: str) -> System:
 
 _bootstrap_worlds()
 SYSTEM = _load_system("白玫瑰")
-WS = Workspace(SYSTEM, grid_getter=_grid_getter)
+WS = Workspace(SYSTEM, grid_getter=_grid_getter,
+               wd_grid_getter=lambda: _GRID["wd_grid"])
 CURRENT_WORLD = "白玫瑰"
 
 
 def _rebuild(system: System, name: str) -> None:
     global SYSTEM, WS, CURRENT_WORLD
     SYSTEM = system
-    WS = Workspace(system, grid_getter=_grid_getter)
+    WS = Workspace(system, grid_getter=_grid_getter,
+                   wd_grid_getter=lambda: _GRID["wd_grid"])
     CURRENT_WORLD = name
 
 
@@ -343,7 +356,10 @@ def api_temperature(name, body):
 def api_star_status():
     return {"ready": _GRID["grid"] is not None,
             "loading": _GRID["loading"], "error": _GRID["error"],
-            "n_tracks": _GRID["n_tracks"]}
+            "n_tracks": _GRID["n_tracks"],
+            "wd_ready": _GRID["wd_grid"] is not None,
+            "wd_error": _GRID["wd_error"],
+            "n_wd_tracks": _GRID["n_wd_tracks"]}
 
 
 def api_star_estimate(body):
@@ -415,8 +431,18 @@ def api_star_edit(body):
         if grid is None:
             raise HttpError(503, "MIST 网格尚未就绪")
         try:
-            p = grid.evaluate(mini, feh,
-                              age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
+            if b.extra.get("evolution_model") == "mist3_wd":
+                wd = _GRID["wd_grid"]
+                if wd is None:
+                    raise HttpError(503, "MIST III WD 网格尚未就绪")
+                p = wd.evaluate(mini, feh,
+                                age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
+            else:
+                grid = _grid_getter()
+                if grid is None:
+                    raise HttpError(503, "MIST 网格尚未就绪")
+                p = grid.evaluate(mini, feh,
+                                  age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
         except ValueError as e:
             raise HttpError(400, str(e))
         # current properties are always computed, never user-supplied

@@ -334,6 +334,21 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   pose ~50–60 Hz、trails ~4–6 Hz;Playwright 全流程烟测(启动/推演/
   暂停冻结/取消回滚)零页面错误、零 HTTP≥400。
 
+## [0.3.0-dev4] - 2026-11-20
+
+### MIST III 白矮星冷却(ADR-0027)
+
+- 后台通过 Clash 代理完成 879 MB `default_grids_full.tgz` 下载与完整性检查;
+  使用其 `Tracks/*.data` 的 M_in/M_WD/log_cool_age/log_tot_age。
+- 新增 `Mist3WDGrid` 与 `evolution_model="mist3_wd"`:沿用初始质量、
+  [Fe/H]、**总年龄**,无需额外冷却年龄字段。WD 质量恒定为 M_WD,
+  mdot=0,半径/光度/Teff 继续只在运行时计算。
+- 199 条 alpha=0、Fe/H=0/+0.25 轨道打包为 20.81 MB
+  `.data/mist3_wd.npz`;原始压缩包不入库,运行时不依赖它。
+- Workspace、编辑器、自动存档和重载均按模型分派;off-grid 就近钳制。
+- 实测 1.2 M☉/15 Gyr:M_WD=0.554515 M☉、Teff≈4275.5 K,
+  冷却单调;新增 3 项锚点/演化/存档集成测试。
+
 ## [0.3.0-dev3] - 2026-11-19
 
 ### 恒星存档单一真源(ADR-0026,用户裁定)
@@ -460,6 +475,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 回扫成本有安全阀(单次 ≤~2000 次积分调用);窗口集合变化 >10% 时缓存
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
+[0.3.0-dev4]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev4
 [0.3.0-dev3]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev3
 [0.3.0-dev2]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev2
 [0.3.0-dev1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev1

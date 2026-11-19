@@ -35,9 +35,10 @@ DEFAULT_INERTIA_FACTOR = 2.0 / 3.0 - 4.0 / np.pi**2
 
 class Workspace:
     def __init__(self, system: System, grid_getter=None,
-                 integrator: str = "ias15"):
+                 integrator: str = "ias15", wd_grid_getter=None):
         self.system = system
         self._grid_getter = grid_getter
+        self._wd_grid_getter = wd_grid_getter
         self.lock = threading.Lock()
         self.sim = NBodySimulation(system, integrator=integrator)
         # epoch consistency: catalog star masses are INITIAL masses; the
@@ -61,8 +62,6 @@ class Workspace:
         out = {}
         grid = self._grid_getter() if self._grid_getter else None
         for s in self.system.stars():
-            if grid is None:
-                continue
             # ADR-0016 schema: the stored mass IS the initial mass (MIST seed)
             mini = s.extra.get("mini_msun", s.mass_kg / M_SUN)
             feh, age0 = s.extra.get("feh"), s.extra.get("age0_gyr")
@@ -70,7 +69,15 @@ class Workspace:
                 continue
             age_yr = age0 * 1e9 + t_s / SECONDS_PER_YEAR
             try:
-                p = grid.evaluate(mini, feh or 0.0, age_yr)
+                if s.extra.get("evolution_model") == "mist3_wd":
+                    wd = self._wd_grid_getter() if self._wd_grid_getter else None
+                    if wd is None:
+                        continue
+                    p = wd.evaluate(mini, feh or 0.0, age_yr)
+                else:
+                    if grid is None:
+                        continue
+                    p = grid.evaluate(mini, feh or 0.0, age_yr)
             except Exception:
                 continue
             out[s.name] = {"mass_kg": p.mass_msun * M_SUN,
