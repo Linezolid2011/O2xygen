@@ -95,6 +95,20 @@
             <label>光度 (L☉)<input id="sx-lum" type="number" step="any" disabled></label>
             <label>有效温度 (K)<input id="sx-teff" type="number" step="any" disabled></label>
           </div>
+          <div class="sec-title">WDCool 后备（仅 WD 质量超出 MIST III 覆盖时启用）</div>
+          <label class="row-flex" style="margin:8px 0">
+            <input type="checkbox" id="sx-use-wdcool"> 指定 WDCool 质量与形成年龄（年龄超界不会触发）
+          </label>
+          <div class="form-grid">
+            <label>WD 质量 (M☉)<input id="sx-wd-mass" type="number" step="any" disabled></label>
+            <label>WD 形成年龄 (Gyr)<input id="sx-wd-formation" type="number" step="any" disabled></label>
+            <label>氢包层
+              <select id="sx-wd-envelope" disabled>
+                <option value="thick">厚氢包层</option>
+                <option value="thin">薄氢包层</option>
+              </select>
+            </label>
+          </div>
           <div class="sec-title">自转</div>
           <div class="form-grid">
             <label>自转轴 X<input id="sx-axis-x" type="number" step="any"></label>

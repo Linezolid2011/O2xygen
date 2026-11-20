@@ -74,7 +74,8 @@ class HttpError(Exception):
 
 # ------------------------------------------------------------- MIST grid -----
 _GRID = {"grid": None, "loading": False, "error": None, "n_tracks": 0,
-         "wd_grid": None, "wd_error": None, "n_wd_tracks": 0}
+         "wd_grid": None, "wd_error": None, "n_wd_tracks": 0,
+         "cool_grid": None, "cool_error": None, "n_cool_sequences": 0}
 
 
 def _load_grid():
@@ -109,6 +110,16 @@ def _load_grid():
         except Exception as e:
             _GRID["wd_error"] = str(e)
             log.exception("MIST III WD grid load failed")
+        try:
+            from o2xygen.wdcool import WDCoolGrid
+            cool_path = ROOT / ".data" / "wdcool.npz"
+            if not cool_path.exists():
+                raise FileNotFoundError(f"no WDCool grid at {cool_path}")
+            _GRID["cool_grid"] = WDCoolGrid(cool_path)
+            _GRID["n_cool_sequences"] = _GRID["cool_grid"].n_sequences
+        except Exception as e:
+            _GRID["cool_error"] = str(e)
+            log.exception("WDCool grid load failed")
     except Exception as e:                       # pragma: no cover
         _GRID["error"] = str(e)
         log.exception("MIST grid load failed")
@@ -125,15 +136,13 @@ def _grid_getter():
     return _GRID["grid"]
 
 
-def _evaluate_stellar(mini_msun: float, feh: float, age_yr: float):
-    """Unified lifecycle: pre-WD MIST, then MIST III WD cooling."""
-    wd = _GRID["wd_grid"]
-    if wd is not None and wd.is_wd_age(mini_msun, feh, age_yr):
-        return wd.evaluate(mini_msun, feh, age_yr)
-    grid = _grid_getter()
-    if grid is None:
-        raise HttpError(503, "MIST 网格尚未就绪")
-    return grid.evaluate(mini_msun, feh, age_yr)
+def _evaluate_stellar(mini_msun: float, feh: float, age_yr: float,
+                      body=None):
+    """Unified lifecycle; WDCool only for WD mass outside MIST III."""
+    from o2xygen.lifecycle import evaluate_stellar
+    return evaluate_stellar(mini_msun, feh, age_yr,
+                            _grid_getter(), _GRID["wd_grid"],
+                            _GRID["cool_grid"], body.extra if body else None)
 
 
 # ------------------------------------------------------------- workspace -----
@@ -174,7 +183,8 @@ def _load_system(name: str) -> System:
 _bootstrap_worlds()
 SYSTEM = _load_system("白玫瑰")
 WS = Workspace(SYSTEM, grid_getter=_grid_getter,
-               wd_grid_getter=lambda: _GRID["wd_grid"])
+               wd_grid_getter=lambda: _GRID["wd_grid"],
+               cool_grid_getter=lambda: _GRID["cool_grid"])
 CURRENT_WORLD = "白玫瑰"
 
 
@@ -182,7 +192,8 @@ def _rebuild(system: System, name: str) -> None:
     global SYSTEM, WS, CURRENT_WORLD
     SYSTEM = system
     WS = Workspace(system, grid_getter=_grid_getter,
-                   wd_grid_getter=lambda: _GRID["wd_grid"])
+                   wd_grid_getter=lambda: _GRID["wd_grid"],
+                   cool_grid_getter=lambda: _GRID["cool_grid"])
     CURRENT_WORLD = name
 
 
@@ -370,7 +381,10 @@ def api_star_status():
             "n_tracks": _GRID["n_tracks"],
             "wd_ready": _GRID["wd_grid"] is not None,
             "wd_error": _GRID["wd_error"],
-            "n_wd_tracks": _GRID["n_wd_tracks"]}
+            "n_wd_tracks": _GRID["n_wd_tracks"],
+            "wdcool_ready": _GRID["cool_grid"] is not None,
+            "wdcool_error": _GRID["cool_error"],
+            "n_cool_sequences": _GRID["n_cool_sequences"]}
 
 
 def api_star_estimate(body):
@@ -427,6 +441,26 @@ def api_star_edit(body):
         raise HttpError(400, "恒星参数必须为有限数值")
     if mini <= 0 or age0 < 0 or period_h < 0:
         raise HttpError(400, "初始质量须为正,年龄/自转周期不得为负")
+    use_cool = body.get("use_wdcool", "wd_mass_msun" in b.extra)
+    if not isinstance(use_cool, bool):
+        raise HttpError(400, "use_wdcool must be boolean")
+    wd_mass = wd_formation = None
+    wd_envelope = "thick"
+    if use_cool:
+        # These are WDCool INPUTS, not MIST outputs, and are used only when
+        # the WD mass is outside MIST III's coverage.
+        wd_mass = _body_float(body, "wd_mass_msun",
+                              b.extra.get("wd_mass_msun", b.mass_kg / M_SUN))
+        wd_formation = _body_float(
+            body, "wd_formation_age_gyr",
+            b.extra.get("wd_formation_age_gyr", max(0.0, age0 - 0.1)))
+        wd_envelope = _body_str(body, "wd_envelope",
+                                b.extra.get("wd_envelope", "thick"))
+        if not np.all(np.isfinite([wd_mass, wd_formation])) \
+                or wd_mass <= 0.0 or wd_formation < 0.0:
+            raise HttpError(400, "WDCool 质量须为正,形成年龄不得为负")
+        if wd_envelope not in ("thick", "thin"):
+            raise HttpError(400, "WDCool 包层仅支持 thick/thin")
     axis = np.asarray(body.get("spin_axis", list(b.spin_axis)), dtype=float)
     if axis.shape != (3,) or not np.all(np.isfinite(axis)) \
             or np.linalg.norm(axis) < 1e-15:
@@ -438,12 +472,20 @@ def api_star_edit(body):
         b.extra["mini_msun"] = mini
         b.extra["feh"] = feh
         b.extra["age0_gyr"] = age0
+        if use_cool:
+            b.extra["wd_mass_msun"] = wd_mass
+            b.extra["wd_formation_age_gyr"] = wd_formation
+            b.extra["wd_envelope"] = wd_envelope
+        else:
+            for key in ("wd_mass_msun", "wd_formation_age_gyr", "wd_envelope"):
+                b.extra.pop(key, None)
         grid = _grid_getter()
         if grid is None:
             raise HttpError(503, "MIST 网格尚未就绪")
         try:
             p = _evaluate_stellar(mini, feh,
-                                  age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
+                                  age0 * 1e9 + WS.sim.t_s / (365.25 * DAY),
+                                  body=b)
         except ValueError as e:
             raise HttpError(400, str(e))
         # current properties are always computed, never user-supplied

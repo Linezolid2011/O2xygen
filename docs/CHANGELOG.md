@@ -334,6 +334,20 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   pose ~50–60 Hz、trails ~4–6 Hz;Playwright 全流程烟测(启动/推演/
   暂停冻结/取消回滚)零页面错误、零 HTTP≥400。
 
+## [0.3.0-dev5] - 2026-11-20
+
+### WDCool 仅接管 MIST III 质量覆盖外的 WD(ADR-0028)
+
+- 接入 Bédard et al. 2020 厚/薄氢包层 46 条序列,压缩为 0.34 MB
+  `.data/wdcool.npz`;无新增运行期依赖。
+- **唯一切换条件 = WD 当前质量超出 MIST III 覆盖**;年龄超界仍由
+  MIST III 处理。覆盖内 WD 即使保存了 WDCool 参数也不会被接管。
+- 新增可入档的 WDCool 模型输入:WD 质量、形成年龄、包层类型;
+  冷却年龄由总年龄减去形成年龄得到,派生输出仍不入档。
+- 编辑器新增独立 WDCool 后备区域;当前质量的 MIST 输出依旧只读。
+- 实测覆盖外 1.2 M☉、覆盖内不切换、关闭后备恢复 MIST III 三条路径;
+  新增 4 项测试,总测试数 91。
+
 ## [0.3.0-dev4] - 2026-11-20
 
 ### MIST III 白矮星冷却(ADR-0027)
@@ -484,6 +498,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 回扫成本有安全阀(单次 ≤~2000 次积分调用);窗口集合变化 >10% 时缓存
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
+[0.3.0-dev5]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev5
 [0.3.0-dev4]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev4
 [0.3.0-dev3]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev3
 [0.3.0-dev2]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev2

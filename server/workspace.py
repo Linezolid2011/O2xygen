@@ -35,10 +35,12 @@ DEFAULT_INERTIA_FACTOR = 2.0 / 3.0 - 4.0 / np.pi**2
 
 class Workspace:
     def __init__(self, system: System, grid_getter=None,
-                 integrator: str = "ias15", wd_grid_getter=None):
+                 integrator: str = "ias15", wd_grid_getter=None,
+                 cool_grid_getter=None):
         self.system = system
         self._grid_getter = grid_getter
         self._wd_grid_getter = wd_grid_getter
+        self._cool_grid_getter = cool_grid_getter
         self.lock = threading.Lock()
         self.sim = NBodySimulation(system, integrator=integrator)
         # epoch consistency: catalog star masses are INITIAL masses; the
@@ -69,13 +71,11 @@ class Workspace:
                 continue
             age_yr = age0 * 1e9 + t_s / SECONDS_PER_YEAR
             try:
+                from o2xygen.lifecycle import evaluate_stellar
                 wd = self._wd_grid_getter() if self._wd_grid_getter else None
-                if wd is not None and wd.is_wd_age(mini, feh or 0.0, age_yr):
-                    p = wd.evaluate(mini, feh or 0.0, age_yr)
-                else:
-                    if grid is None:
-                        continue
-                    p = grid.evaluate(mini, feh or 0.0, age_yr)
+                cool = self._cool_grid_getter() if self._cool_grid_getter else None
+                p = evaluate_stellar(mini, feh or 0.0, age_yr,
+                                     grid, wd, cool, s.extra)
             except Exception:
                 continue
             out[s.name] = {"mass_kg": p.mass_msun * M_SUN,

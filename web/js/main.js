@@ -405,6 +405,13 @@ async function boot() {
     starEditStatus.textContent = "";
   }
   $("#star-edit-close").addEventListener("click", closeStarEditor);
+  function updateWDCoolEditability() {
+    const on = $("#sx-use-wdcool").checked;
+    for (const id of ["sx-wd-mass", "sx-wd-formation", "sx-wd-envelope"]) {
+      document.getElementById(id).disabled = !on;
+    }
+  }
+  $("#sx-use-wdcool").addEventListener("change", updateWDCoolEditability);
 
   async function openStarEditor(name) {
     starDraftName = name;
@@ -424,6 +431,13 @@ async function boot() {
       $("#sx-lum").value = b.luminosity_w / 3.828e26;
       $("#sx-teff").value = b.extra?.teff_k ?? 5772;
       $("#sx-period").value = (b.rotation_period_s ?? 0) / 3600;
+      const useCool = b.extra?.wd_mass_msun != null;
+      $("#sx-use-wdcool").checked = useCool;
+      $("#sx-wd-mass").value = b.extra?.wd_mass_msun ?? b.mass_kg / 1.98847e30;
+      $("#sx-wd-formation").value = b.extra?.wd_formation_age_gyr ??
+        Math.max(0, (b.extra?.age0_gyr ?? 1.0) - 0.1);
+      $("#sx-wd-envelope").value = b.extra?.wd_envelope ?? "thick";
+      updateWDCoolEditability();
       const axis = b.spin_axis ?? [0, 0, 1];
       $("#sx-axis-x").value = axis[0];
       $("#sx-axis-y").value = axis[1];
@@ -444,7 +458,13 @@ async function boot() {
       mini_msun: num("sx-mini"), feh: num("sx-feh"), age0_gyr: num("sx-age"),
       spin_period_h: num("sx-period"),
       spin_axis: [num("sx-axis-x"), num("sx-axis-y"), num("sx-axis-z")],
+      use_wdcool: $("#sx-use-wdcool").checked,
     };
+    if (payload.use_wdcool) {
+      payload.wd_mass_msun = num("sx-wd-mass");
+      payload.wd_formation_age_gyr = num("sx-wd-formation");
+      payload.wd_envelope = $("#sx-wd-envelope").value;
+    }
     const values = [...Object.values(payload).filter((v) => typeof v === "number"),
                     ...payload.spin_axis];
     if (!values.every(Number.isFinite)) {

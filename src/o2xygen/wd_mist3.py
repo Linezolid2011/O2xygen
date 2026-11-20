@@ -83,6 +83,25 @@ class Mist3WDGrid:
             return False
         return age_yr >= self.formation_age_yr(mini_msun, feh)
 
+    def initial_mass_covered(self, mini_msun: float) -> bool:
+        minis = [t[0] for t in self._tracks[self.fehs[0]]]
+        return min(minis) <= mini_msun <= max(minis)
+
+    def wd_mass_covered(self, mass_msun: float, feh: float) -> bool:
+        """Whether the WD's CURRENT mass lies in MIST III's WD-mass range.
+        Only this mass criterion may select the WDCool fallback (ADR-0028)."""
+        feh = float(np.clip(feh, self.fehs[0], self.fehs[-1]))
+        lo = max(f for f in self.fehs if f <= feh)
+        hi = min(f for f in self.fehs if f >= feh)
+        ranges = []
+        for f in (lo, hi):
+            masses = [t[1] for t in self._tracks[f]]
+            ranges.append((min(masses), max(masses)))
+        w = 0.0 if lo == hi else (feh - lo) / (hi - lo)
+        m_lo = (1 - w) * ranges[0][0] + w * ranges[1][0]
+        m_hi = (1 - w) * ranges[0][1] + w * ranges[1][1]
+        return m_lo <= mass_msun <= m_hi
+
     def evaluate(self, mini_msun: float, feh: float, age_yr: float) -> StarProperties:
         if not np.all(np.isfinite([mini_msun, feh, age_yr])):
             raise ValueError("MIST III WD inputs must be finite")

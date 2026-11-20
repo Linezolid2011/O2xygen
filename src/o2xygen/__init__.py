@@ -3,6 +3,6 @@ from . import constants, kepler, system, temperature  # noqa: F401
 from . import mass_radius, structure, world, optimize, astroframe, sky  # noqa: F401
 from . import nbody  # noqa: F401
 try:  # star module needs downloaded MIST grids at runtime, not import time
-    from . import stars, star_evolution, wd_mist3  # noqa: F401
+    from . import stars, star_evolution, wd_mist3, wdcool, lifecycle  # noqa: F401
 except Exception:  # pragma: no cover
     pass
