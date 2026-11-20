@@ -334,6 +334,21 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   pose ~50–60 Hz、trails ~4–6 Hz;Playwright 全流程烟测(启动/推演/
   暂停冻结/取消回滚)零页面错误、零 HTTP≥400。
 
+## [0.3.1] - 2026-11-20
+
+### 查看/编辑模式与统一恒星生命周期
+
+- 恢复顶栏查看/编辑模式:默认查看;编辑模式保留左栏、隐藏右栏并
+  禁止推演;切换模式自动取消活动推演。
+- 新增恒星草稿编辑器:保存并退出才写回,× 不保存;MIST 自变量与自转
+  可编辑,当前质量/半径/光度/Teff 只读,位置/速度尚未开放。
+- 恒星存档只保存模型输入,不再复制 MIST 派生输出;统一生命周期按
+  初始质量/[Fe/H]/总年龄自动进入 MIST III WD 冷却。
+- WDCool 仅接管 WD 质量超出 MIST III 覆盖的对象,年龄越界不触发;
+  MIST III 199 条 WD 轨道与 WDCool 46 条序列随仓库分发。
+- 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
+  锚点与 WDCool 质量分派回归;91 项测试通过。
+
 ## [0.3.0-dev5] - 2026-11-20
 
 ### WDCool 仅接管 MIST III 质量覆盖外的 WD(ADR-0028)
@@ -498,6 +513,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 回扫成本有安全阀(单次 ≤~2000 次积分调用);窗口集合变化 >10% 时缓存
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
+[0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
 [0.3.0-dev5]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev5
 [0.3.0-dev4]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev4
 [0.3.0-dev3]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev3
