@@ -53,6 +53,23 @@ def test_wdcool_only_for_wd_mass_outside_mist3(grids):
     assert outside.luminosity_w == pytest.approx(expected.luminosity_w)
 
 
+def test_ifmr_handoff_from_mist_last_point(grids):
+    from o2xygen.lifecycle import evaluate_stellar
+    from o2xygen.stars import MistGrid
+    wd, cool = grids
+    mist = MistGrid({0.0: ROOT / ".data" / "MIST" / "feh_p0.00",
+                     0.25: ROOT / ".data" / "MIST" / "feh_p0.25"})
+    final = mist.final_point(6.0, 0.0)
+    assert final["mass_msun"] == pytest.approx(1.2032585952180104, rel=1e-12)
+    assert final["age_yr"] == pytest.approx(0.07696121050248737 * 1e9)
+    got = evaluate_stellar(6.0, 0.0, 15.0e9, mist, wd, cool, {})
+    expected = cool.evaluate(final["mass_msun"], 15.0e9 - final["age_yr"],
+                             "thick")
+    assert got.mass_msun == pytest.approx(final["mass_msun"])
+    assert got.teff_k == pytest.approx(expected.teff_k)
+    assert got.luminosity_w == pytest.approx(expected.luminosity_w)
+
+
 def test_wdcool_handles_initial_mass_outside_mist3(grids):
     from o2xygen.lifecycle import evaluate_stellar
     wd, cool = grids

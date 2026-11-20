@@ -296,6 +296,20 @@ def api_get_body(name, query):
     osc = got["snapshot"]["elements"].get(name)
     flux = ill["total"]
     T_eq = equilibrium_temperature(flux, albedo=b.albedo, regime="dayside")
+    cool_input = None
+    try:
+        mini = b.extra.get("mini_msun", b.mass_kg / M_SUN)
+        feh = b.extra.get("feh", 0.0)
+        final = _GRID["grid"].final_point(mini, feh)
+        covered = _GRID["wd_grid"].wd_mass_covered(final["mass_msun"], feh)
+        formation = final["age_yr"]
+        age_yr = b.extra.get("age0_gyr", 1.0) * 1e9 + WS.sim.t_s / (365.25 * DAY)
+        cool_input = {"mass_msun": final["mass_msun"],
+                      "formation_age_gyr": formation / 1e9,
+                      "covered_by_mist3": covered,
+                      "active": age_yr >= formation and not covered}
+    except Exception:
+        cool_input = None
     return {
         "body": body_json(b),
         "illumination": ill,
@@ -303,6 +317,7 @@ def api_get_body(name, query):
         "t_eq_k": T_eq,
         "period_days": None if osc is None else osc["period_days"],
         "osculating": osc,
+        "wdcool_input": cool_input,
     }
 
 

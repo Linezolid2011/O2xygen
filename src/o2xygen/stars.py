@@ -176,6 +176,37 @@ class MistGrid:
             mdot_msun_per_yr=10.0 ** logmdot,
         )
 
+    def final_point(self, mini_msun: float, feh: float) -> dict:
+        """Interpolated LAST point of the MIST grid (the IFMR handoff).
+
+        Returns the progenitor's final mass and the TOTAL age at that point.
+        For WDs outside MIST III's coverage this is the scientific input to
+        WDCool, not an independently editable WD mass (ADR-0028).
+        """
+        if not np.all(np.isfinite([mini_msun, feh])):
+            raise ValueError("MIST inputs must be finite")
+        feh = float(np.clip(feh, self.fehs[0], self.fehs[-1]))
+        lo = max(f for f in self.fehs if f <= feh)
+        hi = min(f for f in self.fehs if f >= feh)
+
+        def at_feh(f):
+            minis, table = self._tracks[f]
+            last_ages = np.array([t[0][-1] for t in table])
+            last_masses = np.array([t[1]["logm"][-1] for t in table])
+            m = float(np.clip(mini_msun, minis[0], minis[-1]))
+            return float(np.interp(m, minis, last_ages)), \
+                float(np.interp(m, minis, last_masses))
+
+        if lo == hi:
+            logage, logm = at_feh(lo)
+        else:
+            w = (feh - lo) / (hi - lo)
+            a0, m0 = at_feh(lo)
+            a1, m1 = at_feh(hi)
+            logage = (1 - w) * a0 + w * a1
+            logm = (1 - w) * m0 + w * m1
+        return {"age_yr": 10.0 ** logage, "mass_msun": 10.0 ** logm}
+
     def solve_age(self, mini_msun: float, feh: float,
                   luminosity_lsun: float, teff_k: float,
                   age_guess_yr: float = 2e9) -> float:

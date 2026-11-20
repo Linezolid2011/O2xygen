@@ -407,8 +407,9 @@ async function boot() {
   $("#star-edit-close").addEventListener("click", closeStarEditor);
   function updateWDCoolEditability() {
     const on = $("#sx-use-wdcool").checked;
+    const derived = window.__wdcoolInput != null;
     for (const id of ["sx-wd-mass", "sx-wd-formation", "sx-wd-envelope"]) {
-      document.getElementById(id).disabled = !on;
+      document.getElementById(id).disabled = !on || derived;
     }
   }
   $("#sx-use-wdcool").addEventListener("change", updateWDCoolEditability);
@@ -431,10 +432,15 @@ async function boot() {
       $("#sx-lum").value = b.luminosity_w / 3.828e26;
       $("#sx-teff").value = b.extra?.teff_k ?? 5772;
       $("#sx-period").value = (b.rotation_period_s ?? 0) / 3600;
-      const useCool = b.extra?.wd_mass_msun != null;
+      const coolInfo = d.wdcool_input ?? null;
+      window.__wdcoolInput = coolInfo;
+      const useCool = b.extra?.wd_mass_msun != null ||
+        (coolInfo && !coolInfo.covered_by_mist3 && coolInfo.active);
       $("#sx-use-wdcool").checked = useCool;
-      $("#sx-wd-mass").value = b.extra?.wd_mass_msun ?? b.mass_kg / 1.98847e30;
-      $("#sx-wd-formation").value = b.extra?.wd_formation_age_gyr ??
+      $("#sx-wd-mass").value = coolInfo?.mass_msun ??
+        b.extra?.wd_mass_msun ?? b.mass_kg / 1.98847e30;
+      $("#sx-wd-formation").value = coolInfo?.formation_age_gyr ??
+        b.extra?.wd_formation_age_gyr ??
         Math.max(0, (b.extra?.age0_gyr ?? 1.0) - 0.1);
       $("#sx-wd-envelope").value = b.extra?.wd_envelope ?? "thick";
       updateWDCoolEditability();

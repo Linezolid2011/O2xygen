@@ -349,6 +349,19 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.0-dev6] - 2026-11-20
+
+### IFMR 由 MIST 末点交接 WDCool(ADR-0028 修订)
+
+- 新增 `MistGrid.final_point`:按初始质量/[Fe/H] 插值 MIST 网格最后一个点的
+  质量与总年龄,作为 WDCool 的质量和形成年龄;不再把 WD 质量当作独立
+  用户输入。显式 WD 质量/形成年龄仅在普通 MIST 网格不可用时兜底。
+- 白玫瑰 progenitor 改为 6.0 M☉,末点给出 WD 质量 1.2032586 M☉,
+  超过 MIST III 上限,正确进入 WDCool;双星轨道仍保持约 3 AU。
+- `/api/body` 返回 `wdcool_input`(末点质量、形成年龄、覆盖状态及是否启用),
+  编辑器显示推导值而非可编辑的独立 WD 质量。
+- 新增 IFMR 末点交接测试;总测试数 92。
+
 ## [0.3.0-dev5] - 2026-11-20
 
 ### WDCool 仅接管 MIST III 质量覆盖外的 WD(ADR-0028)
@@ -514,6 +527,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
+[0.3.0-dev6]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev6
 [0.3.0-dev5]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev5
 [0.3.0-dev4]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev4
 [0.3.0-dev3]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev3

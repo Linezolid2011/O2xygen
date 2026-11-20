@@ -37,7 +37,8 @@ MIST 运行时求值,不另存副本(ADR-0022/0026)。
   温度类查询非破坏化(副本采样,永不拨动活时钟)。
 - **恒星演化**:MIST v1.2(MESA r7503)轨道空间双线性插值,风损质量
   绝热耦合进积分;MIST III 白矮星冷却轨迹按初始质量/[Fe/H]/总年龄求值;
-  仅质量超出 MIST III 覆盖的 WD 使用 WDCool 后备(ADR-0028)。
+  仅质量超出 MIST III 覆盖的 WD 使用 WDCool 后备(ADR-0028);
+  WDCool 的质量与形成年龄由 MIST 网格末点交接,而非独立输入。
   恒星随推演真实老去(质量/半径/温度/光度同步)。
 - **行星结构**:Zeng+2016 PREM 质量-半径拟合、CMF 推断、Maclaurin 扁率、
   n=1 多方球分层。
@@ -66,7 +67,7 @@ python -m venv .venv
 `http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
 测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
-测试(91 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
+测试(92 项,含对公开参照数值的标定、推演控制规则与 desync 回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -96,7 +97,7 @@ J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
 src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
 server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         91 项标定与积分验收测试
+tests/         92 项标定与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)
