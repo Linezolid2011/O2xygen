@@ -66,3 +66,30 @@ def test_wd_workspace_and_save_use_only_mist_inputs(grid, tmp_path):
     again = ws2.state_at(None, with_trails=False)["stars"]["Vesper"]
     for key in ("teff_k", "radius_m", "luminosity_w"):
         assert again[key] == pytest.approx(later[key], rel=1e-12)
+
+
+def test_age_drives_lifecycle_for_arbitrary_star(grid):
+    from o2xygen.stars import StarProperties
+
+    class MainGrid:
+        def evaluate(self, mini, feh, age):
+            return StarProperties(mass_msun=1.28, radius_m=2.0 * R_SUN,
+                                  luminosity_w=3.0 * L_SUN, teff_k=7000.0,
+                                  mdot_msun_per_yr=1e-14)
+
+    w = build_preset()
+    w.bodies["Αστραία"].extra["age0_gyr"] = 1.0
+    ws = Workspace(w, grid_getter=lambda: MainGrid(), wd_grid_getter=lambda: grid)
+    young = ws.state_at(None, with_trails=False)["stars"]["Αστραία"]
+    assert young["teff_k"] == 7000.0
+    assert young["radius_m"] == 2.0 * R_SUN
+
+    w.bodies["Αστραία"].extra["age0_gyr"] = 100.0
+    old = ws.state_at(None, with_trails=False)["stars"]["Αστραία"]
+    expected = grid.evaluate(1.29, 0.1, 100.0e9)
+    assert old["teff_k"] == pytest.approx(expected.teff_k)
+    assert old["radius_m"] == pytest.approx(expected.radius_m)
+    # The massive 6.5 M_sun progenitor reaches WD cooling before 1 Gyr;
+    # there is no hardcoded per-body WD identity.
+    assert grid.is_wd_age(6.5, 0.0, 1.0e9)
+    assert not grid.is_wd_age(1.29, 0.1, 1.0e9)
