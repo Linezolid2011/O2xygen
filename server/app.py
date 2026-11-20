@@ -125,6 +125,17 @@ def _grid_getter():
     return _GRID["grid"]
 
 
+def _evaluate_stellar(mini_msun: float, feh: float, age_yr: float):
+    """Unified lifecycle: pre-WD MIST, then MIST III WD cooling."""
+    wd = _GRID["wd_grid"]
+    if wd is not None and wd.is_wd_age(mini_msun, feh, age_yr):
+        return wd.evaluate(mini_msun, feh, age_yr)
+    grid = _grid_getter()
+    if grid is None:
+        raise HttpError(503, "MIST 网格尚未就绪")
+    return grid.evaluate(mini_msun, feh, age_yr)
+
+
 # ------------------------------------------------------------- workspace -----
 from workspace import Workspace          # noqa: E402
 
@@ -374,7 +385,7 @@ def api_star_estimate(body):
     feh = _body_float(body, "feh", 0.10)
     age_gyr = _body_float(body, "age_gyr", 1.26)
     try:
-        p = _GRID["grid"].evaluate(mass_msun, feh, age_gyr * 1e9)
+        p = _evaluate_stellar(mass_msun, feh, age_gyr * 1e9)
     except ValueError as e:
         # out-of-grid mass/feh/age is a client error, not a server crash
         raise HttpError(400, str(e))
@@ -431,17 +442,7 @@ def api_star_edit(body):
         if grid is None:
             raise HttpError(503, "MIST 网格尚未就绪")
         try:
-            if b.extra.get("evolution_model") == "mist3_wd":
-                wd = _GRID["wd_grid"]
-                if wd is None:
-                    raise HttpError(503, "MIST III WD 网格尚未就绪")
-                p = wd.evaluate(mini, feh,
-                                age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
-            else:
-                grid = _grid_getter()
-                if grid is None:
-                    raise HttpError(503, "MIST 网格尚未就绪")
-                p = grid.evaluate(mini, feh,
+            p = _evaluate_stellar(mini, feh,
                                   age0 * 1e9 + WS.sim.t_s / (365.25 * DAY))
         except ValueError as e:
             raise HttpError(400, str(e))

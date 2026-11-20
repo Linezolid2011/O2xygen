@@ -340,14 +340,19 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 
 - 后台通过 Clash 代理完成 879 MB `default_grids_full.tgz` 下载与完整性检查;
   使用其 `Tracks/*.data` 的 M_in/M_WD/log_cool_age/log_tot_age。
-- 新增 `Mist3WDGrid` 与 `evolution_model="mist3_wd"`:沿用初始质量、
-  [Fe/H]、**总年龄**,无需额外冷却年龄字段。WD 质量恒定为 M_WD,
-  mdot=0,半径/光度/Teff 继续只在运行时计算。
+- 新增 `Mist3WDGrid` 与统一生命周期:总年龄达到 WD 形成年龄后自动切入
+  MIST III 冷却,沿用初始质量、[Fe/H]、**总年龄**,无需模型选择器或
+  额外冷却年龄字段。WD 质量恒定为 M_WD,mdot=0,半径/光度/Teff 继续
+  只在运行时计算。
 - 199 条 alpha=0、Fe/H=0/+0.25 轨道打包为 20.81 MB
   `.data/mist3_wd.npz`;原始压缩包不入库,运行时不依赖它。
 - Workspace、编辑器、自动存档和重载均按模型分派;off-grid 就近钳制。
 - 实测 1.2 M☉/15 Gyr:M_WD=0.554515 M☉、Teff≈4275.5 K,
   冷却单调;新增 3 项锚点/演化/存档集成测试。
+- 白玫瑰改取 M_in=6.5 M☉ 得到 M_WD=1.017626 M☉,并保守星线动量、
+  保持瞬时 a/e 地将 Vesper–WD 相对轨道缩至 0.5 AU;近星点洛希瓣
+  余量充足,非破坏性 10 年积分保持束缚。相关脚本见
+  `change_wd_progenitor.py` / `set_wd_binary_a.py`。
 
 ## [0.3.0-dev3] - 2026-11-19
 

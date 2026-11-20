@@ -24,6 +24,8 @@ def grid():
 
 
 def test_wd_track_anchor_at_1p2_msun_15_gyr(grid):
+    assert not grid.is_wd_age(1.2, 0.0, 1.0e9)
+    assert grid.is_wd_age(1.2, 0.0, 15.0e9)
     p = grid.evaluate(1.2, 0.0, 15.0e9)
     assert p.mass_msun == pytest.approx(0.554515, abs=1e-12)
     assert p.teff_k == pytest.approx(4275.518904362204, rel=1e-12)
@@ -40,7 +42,7 @@ def test_wd_cools_while_mass_stays_constant(grid):
     assert old.teff_k < young.teff_k
 
 
-def test_wd_workspace_and_save_use_model_inputs_only(grid, tmp_path):
+def test_wd_workspace_and_save_use_only_mist_inputs(grid, tmp_path):
     w = build_preset()
     b = w.bodies["Vesper"]
     b.extra.update({"evolution_model": "mist3_wd", "mini_msun": 1.2,
@@ -54,10 +56,11 @@ def test_wd_workspace_and_save_use_model_inputs_only(grid, tmp_path):
     assert later["teff_k"] < got["teff_k"]
     saved = world_mod.system_to_dict(ws.snapshot_for_save())
     bd = next(x for x in saved["bodies"] if x["name"] == "Vesper")
-    assert bd["extra"]["evolution_model"] == "mist3_wd"
+    # the lifecycle switch is derived from age; no model/output duplication
+    assert "evolution_model" not in bd.get("extra", {})
     assert "mass_kg" not in bd and "radius_m" not in bd
     for key in ("teff_k", "luminosity_w"):
-        assert key not in bd["extra"]
+        assert key not in bd.get("extra", {})
     back = world_mod.dict_to_system(saved)
     ws2 = Workspace(back, grid_getter=None, wd_grid_getter=lambda: grid)
     again = ws2.state_at(None, with_trails=False)["stars"]["Vesper"]

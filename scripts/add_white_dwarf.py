@@ -56,7 +56,6 @@ def main(path: Path) -> None:
                radius_m=R_WD, luminosity_w=L_WD,
                extra={"teff_k": TEFF, "mini_msun": 1.2, "feh": 0.0,
                       "age0_gyr": 15.0, "luminosity_w": L_WD,
-                      "evolution_model": "mist3_wd",
                       "love_k2": 1.0e-4, "tidal_dt_s": 100.0,
                       "inertia_factor": 0.08,
                       "note": "off-grid inputs are approximated at the nearest MIST point"}))

@@ -56,6 +56,33 @@ class Mist3WDGrid:
                                [r[1] for r in rows]))
         return np.array([out[0], out[1], out[2], np.log10(mass)])
 
+    def formation_age_yr(self, mini_msun: float, feh: float) -> float:
+        """Interpolated TOTAL age at the first WD-cooling sample."""
+        if not np.all(np.isfinite([mini_msun, feh])):
+            raise ValueError("MIST III WD inputs must be finite")
+        feh = float(np.clip(feh, self.fehs[0], self.fehs[-1]))
+        lo = max(f for f in self.fehs if f <= feh)
+        hi = min(f for f in self.fehs if f >= feh)
+
+        def at_feh(f):
+            table = self._tracks[f]
+            minis = [t[0] for t in table]
+            starts = [t[2][0] for t in table]
+            m = float(np.clip(mini_msun, min(minis), max(minis)))
+            return float(np.interp(m, minis, starts))
+
+        logage = at_feh(lo) if lo == hi else \
+            (1.0 - (feh - lo) / (hi - lo)) * at_feh(lo) \
+            + ((feh - lo) / (hi - lo)) * at_feh(hi)
+        return 10.0 ** logage
+
+    def is_wd_age(self, mini_msun: float, feh: float, age_yr: float) -> bool:
+        """Whether the full stellar lifecycle has reached its WD track."""
+        minis = [t[0] for t in self._tracks[self.fehs[0]]]
+        if not (min(minis) <= mini_msun <= max(minis)) or age_yr <= 0.0:
+            return False
+        return age_yr >= self.formation_age_yr(mini_msun, feh)
+
     def evaluate(self, mini_msun: float, feh: float, age_yr: float) -> StarProperties:
         if not np.all(np.isfinite([mini_msun, feh, age_yr])):
             raise ValueError("MIST III WD inputs must be finite")

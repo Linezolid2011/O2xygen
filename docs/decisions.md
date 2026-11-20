@@ -344,13 +344,14 @@
   1. 使用 `default_grids_full.tgz` 中 `Tracks/*.data`;每条含 M_in、M_WD、
      log_cool_age、log_tot_age。现有存档的初始质量/[Fe/H]/总年龄可直接
      作为输入,**不需要第二个冷却年龄时钟**。
-  2. 新增 `evolution_model="mist3_wd"` 作为模型选择器(属于输入而非
-     派生输出);普通恒星继续走 MIST v1.2。WD 当前质量=M_WD,
+  2. 新增统一生命周期:当总年龄达到该初始质量/[Fe/H] 的 WD 形成年龄,
+     自动从 MIST 切到 MIST III WD 冷却。模型切换由输入年龄推导,
+     **不需要 evolution_model 或第二个冷却年龄时钟入档**。WD 当前质量=M_WD,
      冷却时恒定,mdot=0;半径/光度/Teff 仍只在运行时求值。
   3. 打包 Fe/H=0/+0.25、alpha=0 的 199 条轨道为
      `.data/mist3_wd.npz`(20.81 MB);原始 879 MB tgz 不参与运行且 gitignore。
      插值按总年龄层内初始质量插值,再混合年龄与 Fe/H;off-grid 仍就近钳制。
-  4. Workspace 与编辑器按模型分派,存档只存模型输入。
+  4. Workspace 与编辑器按形成年龄自动分派,存档只存模型输入。
 - **验证**:1.2 M☉ 轨迹在 15 Gyr 给出 M_WD=0.554515 M☉、
   Teff≈4275.5 K、R≈0.01280 R☉、L≈4.933e-5 L☉;质量恒定且冷却单调,
   保存/重载/推演/编辑器路径均通过。

@@ -69,10 +69,8 @@ class Workspace:
                 continue
             age_yr = age0 * 1e9 + t_s / SECONDS_PER_YEAR
             try:
-                if s.extra.get("evolution_model") == "mist3_wd":
-                    wd = self._wd_grid_getter() if self._wd_grid_getter else None
-                    if wd is None:
-                        continue
+                wd = self._wd_grid_getter() if self._wd_grid_getter else None
+                if wd is not None and wd.is_wd_age(mini, feh or 0.0, age_yr):
                     p = wd.evaluate(mini, feh or 0.0, age_yr)
                 else:
                     if grid is None:

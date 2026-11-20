@@ -99,7 +99,8 @@ def system_to_dict(system: System) -> dict:
             extra = b.extra
             if b.kind == STAR:
                 derived = {"mini_msun", "feh", "age0_gyr", "teff_k",
-                           "luminosity_w", "manual_override", "manual_mass_kg"}
+                           "luminosity_w", "evolution_model", "manual_override",
+                           "manual_mass_kg"}
                 extra = {k: v for k, v in b.extra.items() if k not in derived}
             if extra:
                 d["extra"] = _json_safe(extra)
