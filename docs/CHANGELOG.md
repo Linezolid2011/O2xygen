@@ -349,6 +349,20 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.0-dev7] - 2026-11-21
+
+### 恒星编辑器交互与预览(参考 ORBIT 的信息层级,不照搬其模型)
+
+- 编辑器改为输入区/输出区分栏卡片:演化输入、WDCool 后备、自转与
+  只读当前输出分离;增加生命周期模型标签和 Teff 色块。
+- 新增对数年龄滑块与阶段标记;年龄仍是唯一时间输入,不引入第二时钟。
+- 新增 `/api/star/preview`:保存前显示当前质量/半径/光度/Teff、当前
+  损失率、累计质量损失、冷却年龄和所用模型;预览不写 Workspace、
+  不写存档,与保存共用同一草稿。
+- 保持当前输出只读、WDCool 仅由 WD 质量覆盖决定、位置/速度不可编辑。
+- Playwright 实测打开预览、年龄变更预览不保存、× 不保存、保存并退出
+  与恢复;新增预览非破坏性回归,总测试数 93。
+
 ## [0.3.0-dev6] - 2026-11-20
 
 ### IFMR 由 MIST 末点交接 WDCool(ADR-0028 修订)
@@ -527,6 +541,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
+[0.3.0-dev7]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev7
 [0.3.0-dev6]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev6
 [0.3.0-dev5]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev5
 [0.3.0-dev4]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev4

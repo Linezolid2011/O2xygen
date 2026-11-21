@@ -1,6 +1,6 @@
 // o2xygen WebUI bootstrap.
 import { api, errDetail } from "./api.js";
-import { OrbitScene } from "./scene3d.js";
+import { OrbitScene, teffColor } from "./scene3d.js";
 import { buildCatalog } from "./catalog.js";
 import { initPanels, showBody, onTimeChanged, setPanelMode } from "./panels.js";
 import { initTimeline } from "./timeline.js";
@@ -397,6 +397,7 @@ async function boot() {
   const starEditor = $("#star-editor");
   const starEditStatus = $("#star-edit-status");
   const starSaveBtn = $("#star-edit-save");
+  const starPreviewBtn = $("#star-edit-preview");
   let starDraftName = null;
 
   function closeStarEditor() {
@@ -413,6 +414,22 @@ async function boot() {
     }
   }
   $("#sx-use-wdcool").addEventListener("change", updateWDCoolEditability);
+
+  const AGE_LOG_MIN = -3.0, AGE_LOG_MAX = Math.log10(200.0);
+  function updateAgeSlider() {
+    const age = parseFloat($("#sx-age").value);
+    if (!Number.isFinite(age) || age <= 0) return;
+    const frac = Math.max(0, Math.min(1,
+      (Math.log10(age) - AGE_LOG_MIN) / (AGE_LOG_MAX - AGE_LOG_MIN)));
+    $("#sx-age-slider").value = Math.round(frac * 1000);
+    $("#sx-life-marker").style.left = `${frac * 100}%`;
+  }
+  $("#sx-age").addEventListener("input", updateAgeSlider);
+  $("#sx-age-slider").addEventListener("input", () => {
+    const v = Number($("#sx-age-slider").value) / 1000;
+    $("#sx-age").value = 10 ** (AGE_LOG_MIN + v * (AGE_LOG_MAX - AGE_LOG_MIN));
+    updateAgeSlider();
+  });
 
   async function openStarEditor(name) {
     starDraftName = name;
@@ -444,23 +461,23 @@ async function boot() {
         Math.max(0, (b.extra?.age0_gyr ?? 1.0) - 0.1);
       $("#sx-wd-envelope").value = b.extra?.wd_envelope ?? "thick";
       updateWDCoolEditability();
+      updateAgeSlider();
       const axis = b.spin_axis ?? [0, 0, 1];
       $("#sx-axis-x").value = axis[0];
       $("#sx-axis-y").value = axis[1];
       $("#sx-axis-z").value = axis[2];
       starEditStatus.textContent = "";
       starSaveBtn.disabled = false;
+      await previewStar();
     } catch (e) {
       starEditStatus.textContent = e.message;
     }
   }
 
-  starSaveBtn.addEventListener("click", async () => {
-    const name = starDraftName;
-    if (!name || appMode !== "edit") return;
+  function draftPayload() {
     const num = (id) => parseFloat(document.getElementById(id).value);
     const payload = {
-      name,
+      name: starDraftName,
       mini_msun: num("sx-mini"), feh: num("sx-feh"), age0_gyr: num("sx-age"),
       spin_period_h: num("sx-period"),
       spin_axis: [num("sx-axis-x"), num("sx-axis-y"), num("sx-axis-z")],
@@ -471,6 +488,58 @@ async function boot() {
       payload.wd_formation_age_gyr = num("sx-wd-formation");
       payload.wd_envelope = $("#sx-wd-envelope").value;
     }
+    return payload;
+  }
+
+  async function previewStar() {
+    const name = starDraftName;
+    if (!name) return;
+    const payload = draftPayload();
+    const values = [...Object.values(payload).filter((v) => typeof v === "number"),
+                    ...payload.spin_axis];
+    if (!values.every(Number.isFinite)) {
+      starEditStatus.textContent = "所有参数必须为有效数值";
+      return;
+    }
+    starPreviewBtn.disabled = true;
+    starEditStatus.textContent = "正在预览（不保存）…";
+    try {
+      const r = await api.starPreview(payload);
+      if (starDraftName !== name) return;
+      // preview is a draft-only readback; never update the saved catalog here
+      $("#sx-mass").value = r.mass_msun;
+      $("#sx-radius").value = r.radius_rsun;
+      $("#sx-lum").value = r.luminosity_lsun;
+      $("#sx-teff").value = r.teff_k;
+      $("#sx-mdot").textContent = `${r.mdot_msun_yr.toExponential(3)} M☉/年`;
+      $("#sx-loss").textContent = `${r.cumulative_loss_msun.toExponential(4)} M☉`;
+      $("#sx-cooling").textContent = r.cooling_age_gyr == null ? "—" :
+        `${r.cooling_age_gyr.toExponential(4)} Gyr`;
+      const modelText = { mist: "MIST 轨道", mist3_wd: "MIST III · WD 冷却",
+                          wdcool: "WDCool · WD 冷却" };
+      $("#star-edit-model").textContent = modelText[r.model] ?? r.model;
+      $("#star-edit-swatch").style.background = `#${teffColor(r.teff_k).getHexString()}`;
+      if (r.wd_mass_msun != null) $("#sx-wd-mass").value = r.wd_mass_msun;
+      if (r.formation_age_gyr != null) $("#sx-wd-formation").value = r.formation_age_gyr;
+      window.__wdcoolInput = {
+        mass_msun: r.wd_mass_msun, formation_age_gyr: r.formation_age_gyr,
+        covered_by_mist3: r.covered_by_mist3, active: r.model === "wdcool",
+      };
+      updateWDCoolEditability();
+      updateAgeSlider();
+      starEditStatus.textContent = "";
+    } catch (e) {
+      starEditStatus.textContent = e.message;
+    } finally {
+      starPreviewBtn.disabled = false;
+    }
+  }
+  starPreviewBtn.addEventListener("click", previewStar);
+
+  starSaveBtn.addEventListener("click", async () => {
+    const name = starDraftName;
+    if (!name || appMode !== "edit") return;
+    const payload = draftPayload();
     const values = [...Object.values(payload).filter((v) => typeof v === "number"),
                     ...payload.spin_axis];
     if (!values.every(Number.isFinite)) {

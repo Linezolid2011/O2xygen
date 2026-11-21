@@ -40,6 +40,7 @@ export const api = {
   starEnsure: () => jget("/api/star/ensure"),
   starEstimate: (req) => jpost("/api/star/estimate", req),
   starEdit: (req) => jpost("/api/star/edit", req),
+  starPreview: (req) => jpost("/api/star/preview", req),
   pipeline: (req) => jpost("/api/pipeline", req),
   worlds: () => jget("/api/worlds"),
   worldLoad: (name) => jpost("/api/world/load", { name }),

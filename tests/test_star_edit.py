@@ -37,3 +37,18 @@ def test_current_stellar_outputs_are_not_editable_inputs():
         with pytest.raises(app.HttpError) as exc:
             app.api_star_edit({"name": "Vesper", field: 1.0})
         assert exc.value.status == 400
+
+
+def test_preview_is_non_destructive_and_reports_lifecycle():
+    import app
+    app._load_grid()
+    before = app.SYSTEM.bodies["Vesper"].extra["age0_gyr"]
+    t0 = app.WS.sim.t_s
+    path = app._worlds_dir() / f"{app.CURRENT_WORLD}.oxygen"
+    mtime = path.stat().st_mtime
+    got = app.api_star_preview({"name": "Vesper", "age0_gyr": 100.0})
+    assert got["model"] in ("mist3_wd", "wdcool")
+    assert got["radius_rsun"] < 0.1
+    assert app.SYSTEM.bodies["Vesper"].extra["age0_gyr"] == before
+    assert app.WS.sim.t_s == t0
+    assert path.stat().st_mtime == mtime

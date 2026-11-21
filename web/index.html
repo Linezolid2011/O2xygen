@@ -74,50 +74,76 @@
       <div id="view-hint">左键旋转 · 右键平移 · 滚轮缩放 · 点击天体选中</div>
       <section id="star-editor" class="editor-overlay" hidden>
         <div class="editor-head">
-          <div>
-            <div class="modal-eyebrow">STELLAR EDITOR</div>
-            <h2 id="star-edit-title">恒星</h2>
+          <div class="editor-title-row">
+            <span id="star-edit-swatch" class="star-preview-swatch"></span>
+            <div>
+              <div class="modal-eyebrow">STELLAR EDITOR</div>
+              <h2 id="star-edit-title">恒星</h2>
+              <span id="star-edit-model" class="life-badge">MIST 轨道</span>
+            </div>
           </div>
           <button class="icon-btn" id="star-edit-close" title="退出但不保存">✕</button>
         </div>
-        <p class="modal-note">草稿仅在“保存并退出”时写回。暂不支持修改位置和速度。</p>
-        <div class="editor-form">
-          <div class="sec-title">MIST 演化种子</div>
-          <div class="form-grid">
-            <label>初始质量 (M☉)<input id="sx-mini" type="number" step="any"></label>
-            <label>[Fe/H]<input id="sx-feh" type="number" step="any"></label>
-            <label>世界历元年龄 (Gyr)<input id="sx-age" type="number" step="any"></label>
+        <p class="modal-note">草稿仅在“保存并退出”时写回。预览不会保存。暂不支持修改位置和速度。</p>
+        <div class="editor-columns">
+          <div class="editor-main">
+            <section class="editor-card">
+              <div class="sec-title">演化输入（MIST 自变量）</div>
+              <div class="form-grid">
+                <label>初始质量 (M☉)<input id="sx-mini" type="number" step="any"></label>
+                <label>[Fe/H]<input id="sx-feh" type="number" step="any"></label>
+                <label>当前总年龄 (Gyr)<input id="sx-age" type="number" step="any"></label>
+              </div>
+              <label class="field">年龄滑块（对数刻度；仅辅助输入）
+                <input id="sx-age-slider" type="range" min="0" max="1000" step="1" value="0">
+              </label>
+              <div class="life-track"><span id="sx-life-marker"></span></div>
+              <div class="life-caption"><span id="sx-age-range">0.001–200 Gyr</span><span>年龄改变生命周期，不改变存档结构</span></div>
+            </section>
+            <section class="editor-card">
+              <div class="sec-title">WDCool 后备</div>
+              <div class="note">仅在 WD 质量超出 MIST III 覆盖时启用；质量与形成年龄由 MIST 末点推导。年龄超界不触发。</div>
+              <label class="row-flex" style="margin:8px 0">
+                <input type="checkbox" id="sx-use-wdcool"> 启用 WDCool 后备
+              </label>
+              <div class="form-grid">
+                <label>WD 质量 (M☉)<input id="sx-wd-mass" type="number" step="any" disabled></label>
+                <label>WD 形成年龄 (Gyr)<input id="sx-wd-formation" type="number" step="any" disabled></label>
+                <label>氢包层
+                  <select id="sx-wd-envelope" disabled>
+                    <option value="thick">厚氢包层</option>
+                    <option value="thin">薄氢包层</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+            <section class="editor-card">
+              <div class="sec-title">自转</div>
+              <div class="form-grid">
+                <label>自转轴 X<input id="sx-axis-x" type="number" step="any"></label>
+                <label>自转轴 Y<input id="sx-axis-y" type="number" step="any"></label>
+                <label>自转轴 Z<input id="sx-axis-z" type="number" step="any"></label>
+                <label>自转周期 (h；0 = 不旋转)<input id="sx-period" type="number" step="any"></label>
+              </div>
+            </section>
           </div>
-          <div class="sec-title">当前物理属性（MIST 计算输出 · 只读）</div>
-          <div class="form-grid">
-            <label>当前质量 (M☉)<input id="sx-mass" type="number" step="any" disabled></label>
-            <label>半径 (R☉)<input id="sx-radius" type="number" step="any" disabled></label>
-            <label>光度 (L☉)<input id="sx-lum" type="number" step="any" disabled></label>
-            <label>有效温度 (K)<input id="sx-teff" type="number" step="any" disabled></label>
-          </div>
-          <div class="sec-title">WDCool 后备（仅 WD 质量超出 MIST III 覆盖时启用；由 MIST 末点推导）</div>
-          <label class="row-flex" style="margin:8px 0">
-            <input type="checkbox" id="sx-use-wdcool"> 指定 WDCool 质量与形成年龄（年龄超界不会触发）
-          </label>
-          <div class="form-grid">
-            <label>WD 质量 (M☉)<input id="sx-wd-mass" type="number" step="any" disabled></label>
-            <label>WD 形成年龄 (Gyr)<input id="sx-wd-formation" type="number" step="any" disabled></label>
-            <label>氢包层
-              <select id="sx-wd-envelope" disabled>
-                <option value="thick">厚氢包层</option>
-                <option value="thin">薄氢包层</option>
-              </select>
-            </label>
-          </div>
-          <div class="sec-title">自转</div>
-          <div class="form-grid">
-            <label>自转轴 X<input id="sx-axis-x" type="number" step="any"></label>
-            <label>自转轴 Y<input id="sx-axis-y" type="number" step="any"></label>
-            <label>自转轴 Z<input id="sx-axis-z" type="number" step="any"></label>
-            <label>自转周期 (h；0 = 不旋转)<input id="sx-period" type="number" step="any"></label>
-          </div>
+          <aside class="editor-side">
+            <section class="editor-card">
+              <div class="sec-title">当前物理输出（只读）</div>
+              <div class="form-grid">
+                <label>当前质量 (M☉)<input id="sx-mass" type="number" step="any" disabled></label>
+                <label>半径 (R☉)<input id="sx-radius" type="number" step="any" disabled></label>
+                <label>光度 (L☉)<input id="sx-lum" type="number" step="any" disabled></label>
+                <label>有效温度 (K)<input id="sx-teff" type="number" step="any" disabled></label>
+              </div>
+              <div class="kv"><span class="k">当前质量损失率</span><span class="v" id="sx-mdot">—</span></div>
+              <div class="kv"><span class="k">累计质量损失</span><span class="v" id="sx-loss">—</span></div>
+              <div class="kv"><span class="k">冷却年龄</span><span class="v" id="sx-cooling">—</span></div>
+            </section>
+          </aside>
         </div>
         <div class="modal-foot editor-foot">
+          <button class="btn ghost" id="star-edit-preview">预览（不保存）</button>
           <button class="btn accent" id="star-edit-save">保存并退出</button>
           <span id="star-edit-status" class="err"></span>
         </div>

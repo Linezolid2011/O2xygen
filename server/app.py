@@ -34,6 +34,7 @@ import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import numpy as np
@@ -429,6 +430,66 @@ def api_star_estimate(body):
 
 
 # ------------------------------------------------------------- star editor ---
+def api_star_preview(body):
+    """Non-destructive editor preview: evaluate the CURRENT draft, never
+    write the workspace or save file. Same scientific inputs as star_edit."""
+    name = _body_str(body, "name", required=True)
+    b = SYSTEM.bodies.get(name)
+    if b is None:
+        raise HttpError(404, f"no body '{name}'")
+    if b.kind != STAR:
+        raise HttpError(400, "只能预览恒星")
+    forbidden = {"mass_msun", "radius_rsun", "luminosity_lsun", "teff_k",
+                 "use_mist"} & set(body)
+    if forbidden:
+        raise HttpError(400, "当前质量/半径/光度/有效温度是 MIST 输出,只读")
+    mini = _body_float(body, "mini_msun", b.extra.get("mini_msun", b.mass_kg / M_SUN))
+    feh = _body_float(body, "feh", b.extra.get("feh", 0.0))
+    age0 = _body_float(body, "age0_gyr", b.extra.get("age0_gyr", 1.0))
+    if not np.all(np.isfinite([mini, feh, age0])) or mini <= 0 or age0 < 0:
+        raise HttpError(400, "MIST 输入须为有限值,初始质量为正,年龄非负")
+    extra = dict(b.extra)
+    use_cool = body.get("use_wdcool", "wd_mass_msun" in b.extra)
+    if not isinstance(use_cool, bool):
+        raise HttpError(400, "use_wdcool must be boolean")
+    if use_cool:
+        wd_mass = _body_float(body, "wd_mass_msun",
+                              b.extra.get("wd_mass_msun", b.mass_kg / M_SUN))
+        formation = _body_float(body, "wd_formation_age_gyr",
+                                b.extra.get("wd_formation_age_gyr", 0.0))
+        envelope = _body_str(body, "wd_envelope",
+                             b.extra.get("wd_envelope", "thick"))
+        if not np.all(np.isfinite([wd_mass, formation])) or wd_mass <= 0 \
+                or formation < 0 or envelope not in ("thick", "thin"):
+            raise HttpError(400, "WDCool 输入无效")
+        extra.update({"wd_mass_msun": wd_mass,
+                      "wd_formation_age_gyr": formation,
+                      "wd_envelope": envelope})
+    else:
+        for key in ("wd_mass_msun", "wd_formation_age_gyr", "wd_envelope"):
+            extra.pop(key, None)
+    age_yr = age0 * 1e9 + WS.sim.t_s / (365.25 * DAY)
+    try:
+        p = _evaluate_stellar(mini, feh, age_yr,
+                              body=SimpleNamespace(extra=extra))
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    from o2xygen.lifecycle import resolve_stellar
+    meta = resolve_stellar(mini, feh, age_yr, _grid_getter(),
+                           _GRID["wd_grid"], _GRID["cool_grid"], extra)
+    return {"name": name, "mass_msun": p.mass_msun,
+            "radius_rsun": p.radius_m / R_SUN,
+            "luminosity_lsun": p.luminosity_w / L_SUN,
+            "teff_k": p.teff_k, "mdot_msun_yr": p.mdot_msun_per_yr,
+            "cumulative_loss_msun": mini - p.mass_msun,
+            "model": meta["model"], "wd_mass_msun": meta["wd_mass_msun"],
+            "formation_age_gyr": None if meta["formation_age_yr"] is None
+                                   else meta["formation_age_yr"] / 1e9,
+            "covered_by_mist3": meta["covered_by_mist3"],
+            "cooling_age_gyr": None if meta["cooling_age_yr"] is None
+                                 else meta["cooling_age_yr"] / 1e9}
+
+
 def api_star_edit(body):
     """Save a stellar draft from edit mode. Only MIST inputs (initial mass,
     Fe/H, epoch age) and spin are editable. Current mass/radius/luminosity/
@@ -894,6 +955,8 @@ def route_api(method: str, segs: list[str], query: dict, body: dict):
             return api_star_status(), 200
         if method == "POST" and tail == ["star", "estimate"]:
             return api_star_estimate(body)
+    if method == "POST" and tail == ["star", "preview"]:
+        return api_star_preview(body), 200
     if method == "POST" and tail == ["star", "edit"]:
         return api_star_edit(body), 200
     if method == "POST" and tail == ["pipeline"]:
