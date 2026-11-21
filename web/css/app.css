@@ -267,6 +267,16 @@ input:disabled { opacity: 0.4; cursor: default; }
 .modal-eyebrow { font-size: 9px; letter-spacing: 2px; color: var(--text-faint); margin-bottom: 3px; }
 .modal-head h3 { font-size: 16px; font-weight: 600; }
 .modal-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+#align-status { margin-right: auto; font-size: 11px; }
+.align-operation {
+  margin: 14px 0 12px; padding: 13px 14px; border: 1px solid var(--border-soft);
+  border-radius: 9px; background: var(--bg-elev);
+}
+.align-op-title { color: var(--accent); font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.align-op-target { color: var(--text-dim); font-size: 12px; }
+.align-op-target span { color: var(--accent); padding: 0 7px; }
+#align-modal .modal-note { margin-bottom: 10px; }
+#align-modal .modal-foot { margin-top: 16px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; margin-bottom: 6px; }
 .form-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--text-dim); }
 

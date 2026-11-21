@@ -349,6 +349,15 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.0-dev11] - 2026-11-21
+
+### 对齐确认改为应用内浮窗
+
+- 移除浏览器原生 `confirm()`,改为与推演一致的自定义浮窗:标题、
+  关闭按钮、覆盖存档提示、纯平移说明、不变量清单与取消/确认按钮。
+- “取消”与“✕”仅关闭浮窗,不发送请求;“确认对齐”才保存并重载。
+  请求期间锁定浮窗控制,错误直接显示在浮窗底部;切换模式会关闭浮窗。
+
 ## [0.3.0-dev10] - 2026-11-21
 
 ### 编辑模式“对齐”按钮(ADR-0031,用户裁定)
@@ -584,6 +593,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
+[0.3.0-dev11]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev11
 [0.3.0-dev10]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev10
 [0.3.0-dev9]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev9
 [0.3.0-dev8]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev8

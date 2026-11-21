@@ -219,6 +219,33 @@
   </div>
 </div>
 
+<!-- ======================= barycenter alignment modal ======================= -->
+<div class="modal-mask" id="align-modal" hidden>
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-eyebrow">O2XYGEN WORLD FRAME</div>
+        <h3>质心对齐 · <span id="align-world">—</span></h3>
+      </div>
+      <button class="icon-btn" id="align-close" title="取消对齐">✕</button>
+    </div>
+    <p class="modal-note warn">此操作会覆盖当前世界存档。如需保留原坐标,
+    请先使用“另存为”备份。</p>
+    <div class="align-operation">
+      <div class="align-op-title">仅整体平移位置</div>
+      <div class="align-op-target">当前系统质心 <span>→</span> 世界原点 (0, 0, 0)</div>
+    </div>
+    <p class="modal-note">质量、年龄、相对位置、相对速度、自转轴方向和自转速度
+    均保持不变。不做速度归零,也不清空风账本。</p>
+    <p class="modal-note warn">确认后页面将重新载入,未保存的草稿会丢失。</p>
+    <div class="modal-foot">
+      <span id="align-status" class="err"></span>
+      <button class="btn ghost" id="align-cancel">取消</button>
+      <button class="btn accent" id="align-confirm">确认对齐</button>
+    </div>
+  </div>
+</div>
+
 <!-- ======================= astronomical frame modal ======================= -->
 <div class="modal-mask" id="astro-frame-modal" hidden>
   <div class="modal">

@@ -385,6 +385,7 @@ async function boot() {
       $("#btn-astro-frame").hidden = next !== "edit";
       afModal.hidden = true;
       evModal.hidden = true;
+      $("#align-modal").hidden = true;
       closeStarEditor();
       setPanelMode(next);
       setEvolveButton("idle");       // edit mode: disabled by appMode
@@ -600,21 +601,41 @@ async function boot() {
   });
 
   // ---------------- barycenter alignment (edit mode only) ----------------
-  $("#btn-align").addEventListener("click", async () => {
-    if (appMode !== "edit" || evolving) return;  // disabled in view mode too
-    const message =
-      "将系统质心平移到世界原点并覆盖当前存档？\n\n" +
-      "只进行整体坐标平移：质量、年龄、相对位置、相对速度、" +
-      "自转轴方向和自转速度均不变。\n\n" +
-      "确认后页面会重新载入，未保存的草稿将丢失。";
-    if (!confirm(message)) return;
-    $("#btn-align").disabled = true;
+  const alignModal = $("#align-modal");
+  const alignConfirm = $("#align-confirm");
+  const alignStatus = $("#align-status");
+  let alignBusy = false;
+
+  function setAlignBusy(on) {
+    alignBusy = on;
+    alignConfirm.disabled = on;
+    $("#align-cancel").disabled = on;
+    $("#align-close").disabled = on;
+    $("#btn-align").disabled = on || appMode !== "edit";
+  }
+  $("#btn-align").addEventListener("click", () => {
+    if (appMode !== "edit" || evolving || alignBusy) return;
+    $("#align-world").textContent = system.world ?? system.name;
+    alignStatus.textContent = "";
+    setAlignBusy(false);
+    alignModal.hidden = false;
+  });
+  for (const id of ["#align-close", "#align-cancel"]) {
+    $(id).addEventListener("click", () => {
+      if (!alignBusy) alignModal.hidden = true;   // no request, no save
+    });
+  }
+  alignConfirm.addEventListener("click", async () => {
+    if (appMode !== "edit" || evolving || alignBusy) return;
+    setAlignBusy(true);
+    alignStatus.textContent = "正在对齐并保存…";
     try {
       await api.worldAlign();
+      alignModal.hidden = true;
       location.reload();               // re-read the saved aligned epoch
     } catch (e) {
-      alert(`对齐失败:${e.message}`);
-      lockWorldUI(false);
+      alignStatus.textContent = e.message;
+      setAlignBusy(false);
     }
   });
 
