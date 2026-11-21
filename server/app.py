@@ -20,7 +20,7 @@ API contract (unchanged from the FastAPI era — the client depends on it):
   POST /api/add_body                     (409 during evolution)
   POST /api/evolve/start|pause|resume|cancel|speed, GET /api/evolve/status
   GET  /api/debug/metrics
-  GET  /api/worlds, POST /api/world/load, POST /api/world/save
+  GET  /api/worlds, POST /api/world/load|save|align
 Errors are JSON {"detail": msg} with 400/404/409/413/503 as before.
 """
 import json
@@ -793,6 +793,27 @@ def api_world_save(body):
     return {"ok": True, "world": path.stem}
 
 
+def api_world_align(body):
+    """Confirmed edit-mode action: translate the current barycenter to O.
+
+    This is deliberately NOT reset_conservation_epoch: no velocity boost, no
+    wind reset, no mass/age/spin changes.  Only coordinates and their
+    origin-dependent moments change; the resulting epoch is saved at once.
+    """
+    if _evolution_active():
+        raise HttpError(409, "推演进行中,不能对齐世界原点")
+    if body.get("confirm") is not True:
+        raise HttpError(400, "对齐操作需要明确确认")
+    with WS.lock:
+        shift, before, after = WS.sim.align_barycenter_to_origin()
+        WS._trail_cache = None
+    world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
+    return {"ok": True, "world": CURRENT_WORLD,
+            "translation_m": [float(x) for x in shift],
+            "barycenter_before_m": [float(x) for x in before],
+            "barycenter_after_m": [float(x) for x in after]}
+
+
 # ------------------------------------------------------------- astro frame ---
 def api_get_astroframe():
     f = normalize_astro_frame(SYSTEM.astro_frame)
@@ -995,6 +1016,8 @@ def route_api(method: str, segs: list[str], query: dict, body: dict):
         return api_world_load(body), 200
     if method == "POST" and tail == ["world", "save"]:
         return api_world_save(body), 200
+    if method == "POST" and tail == ["world", "align"]:
+        return api_world_align(body), 200
     if method == "GET" and tail == ["astroframe"]:
         return api_get_astroframe(), 200
     if method == "POST" and tail == ["astroframe"]:

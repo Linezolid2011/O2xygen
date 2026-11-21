@@ -320,6 +320,46 @@ class NBodySimulation:
         update_sim_masses(self.sim, self._index, mass_kg, self.wind,
                           record_wind=record_wind)
 
+    def align_barycenter_to_origin(self):
+        """Pure coordinate translation: put the REMAINING-body barycenter at O.
+
+        Masses, velocities, ages, spins and every relative body state are left
+        untouched; unlike ``reset_conservation_epoch`` this neither boosts nor
+        clears wind.  The wind's origin-dependent Q and L undergo the SAME
+        translation, so bodies + wind remain one consistent coordinate system.
+        Returns (shift, barycenter_before, barycenter_after), all SI vectors.
+        """
+        ps = self.sim.particles
+        if len(ps) == 0:
+            raise ValueError("cannot align an empty system")
+        ms = np.array([p.m for p in ps])
+        pos = np.array([p.xyz for p in ps])
+        m_tot = float(ms.sum())
+        if not np.isfinite(m_tot) or m_tot <= 0.0:
+            raise ValueError("alignment needs positive total mass")
+        before = (ms[:, None] * pos).sum(axis=0) / m_tot
+        shift = -before
+        t_s = float(self.sim.t)
+        wind = self.wind.at(t_s)
+        wind.first_moment_kg_m += wind.mass_kg * shift
+        wind.angular_momentum_kg_m2_s += np.cross(
+            shift, wind.momentum_kg_m_s)
+        for p in ps:
+            p.x, p.y, p.z = [float(x) for x in (np.array(p.xyz) + shift)]
+        self.wind = wind
+        # Old checkpoints are in the old coordinates; future/past queries must
+        # start at the aligned epoch instead of mixing two origin definitions.
+        self._cp_times = [t_s]
+        self._cp_snaps = [self._snapshot()]
+        if getattr(self.sim, "integrator", "") in ("whfast", "whc"):
+            try:
+                self.sim.ri_whfast.recalculate_coordinates_this_timestep = 1
+            except Exception:
+                pass
+        pos_after = np.array([p.xyz for p in ps])
+        after = (ms[:, None] * pos_after).sum(axis=0) / m_tot
+        return shift, before, after
+
     def reset_conservation_epoch(self, recenter: bool = True) -> None:
         """Establish a new manual-edit baseline without inventing wind.
 

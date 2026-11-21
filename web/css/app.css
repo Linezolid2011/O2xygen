@@ -72,6 +72,7 @@ body {
 .btn:hover { background: var(--bg-hover); }
 .btn.accent { background: linear-gradient(135deg, #ef9f80, #dd7f5e); border: none; color: #221510; font-weight: 600; }
 .btn.accent:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: 0.38; cursor: default; filter: none; }
 .btn.ghost { background: transparent; }
 .icon-btn {
   width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border);
@@ -265,18 +266,7 @@ input:disabled { opacity: 0.4; cursor: default; }
 .modal-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
 .modal-eyebrow { font-size: 9px; letter-spacing: 2px; color: var(--text-faint); margin-bottom: 3px; }
 .modal-head h3 { font-size: 16px; font-weight: 600; }
-#pipeline-stages { list-style: none; margin-bottom: 12px; }
-#pipeline-stages li {
-  display: flex; justify-content: space-between; padding: 9px 12px; margin-bottom: 6px;
-  background: var(--bg-elev); border-radius: 8px; font-size: 12.5px;
-}
-#pipeline-stages li .st { color: var(--text-faint); }
-#pipeline-stages li.done .st { color: var(--green); }
-#pipeline-stages li.running .st { color: var(--accent); }
-.progress { height: 5px; background: var(--bg-elev); border-radius: 3px; overflow: hidden; margin-bottom: 12px; }
-.progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #ef9f80, #dd7f5e); transition: width .3s; }
 .modal-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
-.modal-foot #pipeline-status { margin-right: auto; font-size: 11px; color: var(--text-faint); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; margin-bottom: 6px; }
 .form-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--text-dim); }
 

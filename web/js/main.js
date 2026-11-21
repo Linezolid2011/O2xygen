@@ -212,10 +212,13 @@ async function boot() {
   }
 
   function lockWorldUI(on) {
-    for (const id of ["world-select", "btn-world-save", "btn-pipeline"]) {
+    for (const id of ["world-select", "btn-world-save"]) {
       const el = document.getElementById(id);
       if (el) el.disabled = on;
     }
+    const align = $("#btn-align");
+    align.disabled = on || appMode !== "edit";
+    align.classList.toggle("accent", appMode === "edit");
   }
 
   evBtn.addEventListener("click", async () => {
@@ -385,6 +388,7 @@ async function boot() {
       closeStarEditor();
       setPanelMode(next);
       setEvolveButton("idle");       // edit mode: disabled by appMode
+      lockWorldUI(false);            // align is orange ONLY in edit mode
     } catch (e) {
       alert(`切换模式失败:${e.message}`);
     } finally {
@@ -595,51 +599,24 @@ async function boot() {
     }
   });
 
-  // ---------------- pipeline modal ----------------
-  const modal = $("#pipeline-modal");
-  $("#btn-pipeline").addEventListener("click", () => {
-    if (!selected) { alert("请先在左侧目录选择一个天体"); return; }
-    runPipeline(selected);
-  });
-  $("#pipeline-close").addEventListener("click", () => { modal.hidden = true; });
-  $("#pipeline-cancel").addEventListener("click", () => { modal.hidden = true; });
-
-  async function runPipeline(bodyName) {
-    modal.hidden = false;
-    const ul = $("#pipeline-stages");
-    const fill = $("#pipeline-fill");
-    const status = $("#pipeline-status");
-    ul.innerHTML = "";
-    fill.style.width = "0%";
-    const stageDefs = ["结构与尺寸", "大气与光学厚度", "温度表"];
-    const li = stageDefs.map((n) => {
-      const el = document.createElement("li");
-      el.innerHTML = `<span>${n}</span><span class="st">等待中…</span>`;
-      ul.appendChild(el);
-      return el;
-    });
-    status.textContent = `求解对象:${bodyName}`;
+  // ---------------- barycenter alignment (edit mode only) ----------------
+  $("#btn-align").addEventListener("click", async () => {
+    if (appMode !== "edit" || evolving) return;  // disabled in view mode too
+    const message =
+      "将系统质心平移到世界原点并覆盖当前存档？\n\n" +
+      "只进行整体坐标平移：质量、年龄、相对位置、相对速度、" +
+      "自转轴方向和自转速度均不变。\n\n" +
+      "确认后页面会重新载入，未保存的草稿将丢失。";
+    if (!confirm(message)) return;
+    $("#btn-align").disabled = true;
     try {
-      // animate stage transitions while the real request runs
-      li[0].classList.add("running");
-      li[0].querySelector(".st").textContent = "正在求解…";
-      const t0 = performance.now();
-      const res = await api.pipeline({ body: bodyName, span_days: timeline.spanDays, n_samples: 13 });
-      const minMs = 900;                      // let the progress read, like his dialog
-      const wait = Math.max(0, minMs - (performance.now() - t0));
-      await new Promise((r) => setTimeout(r, wait));
-      li.forEach((el, i) => {
-        el.classList.remove("running");
-        el.classList.add("done");
-        el.querySelector(".st").textContent = "已完成";
-        fill.style.width = `${((i + 1) / 3) * 100}%`;
-      });
-      status.textContent = `完成,用时 ${res.elapsed_s.toFixed(2)} s`;
-      await showBody(bodyName);               // refresh tabs with pipeline results
+      await api.worldAlign();
+      location.reload();               // re-read the saved aligned epoch
     } catch (e) {
-      status.innerHTML = `<span class="err">失败:${e.message}</span>`;
+      alert(`对齐失败:${e.message}`);
+      lockWorldUI(false);
     }
-  }
+  });
 
   // ---------------- add-body modal ----------------
   // TEMP-DISABLED(2026-11-15): 添加天体挡路,后续加回。连同 index.html 的按钮与本块一起取消注释。

@@ -41,10 +41,10 @@ export const api = {
   starEstimate: (req) => jpost("/api/star/estimate", req),
   starEdit: (req) => jpost("/api/star/edit", req),
   starPreview: (req) => jpost("/api/star/preview", req),
-  pipeline: (req) => jpost("/api/pipeline", req),
   worlds: () => jget("/api/worlds"),
   worldLoad: (name) => jpost("/api/world/load", { name }),
   worldSave: (name) => jpost("/api/world/save", { name }),
+  worldAlign: () => jpost("/api/world/align", { confirm: true }),
   astroFrame: () => jget("/api/astroframe"),
   astroFrameSave: (req) => jpost("/api/astroframe", req),
   sky: (body, mlim = 8.0) =>
