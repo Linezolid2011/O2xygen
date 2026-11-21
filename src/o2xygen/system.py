@@ -11,6 +11,7 @@ from typing import Optional
 import numpy as np
 
 from .astroframe import default_astro_frame
+from .wind import WindLedger
 
 STAR, BODY = "star", "body"
 
@@ -77,6 +78,8 @@ class System:
         self.bodies: dict[str, Body] = {}
         self.epoch_s = 0.0
         self.astro_frame = default_astro_frame()  # heliocentric ICRS/J2000 placement
+        # Escaped-wind history is dynamical state, not a MIST-derived output.
+        self.wind = WindLedger()
 
     def add(self, body: Body) -> None:
         if body.name in self.bodies:

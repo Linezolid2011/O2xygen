@@ -4,12 +4,18 @@ A world is a FLAT N-body system. No hierarchy, no moons: bodies are either
 stars or non-stars, each with Cartesian initial conditions. Keplerian
 elements are a placement tool, never stored.
 
-Schema v1:
+Schema v2 (v1 remains readable; its missing wind ledger means a zero baseline):
 {
   "format": "o2xygen-world",
-  "version": 1,
+  "version": 2,
   "name": "...",
   "origin": "<body name> or null",       # metadata only (ADR-0022)
+  "wind": {                             # escaped-wind history (ADR-0030)
+    "time_s": 0.0, "mass_kg": ...,
+    "momentum_kg_m_s": [x,y,z],
+    "angular_momentum_kg_m2_s": [x,y,z],
+    "first_moment_kg_m": [x,y,z]
+  },
   "astro_frame": {                       # fixed heliocentric ICRS placement
     "position_j2000_pc": [x,y,z],
     "epoch_jd_tt": 2451545.0,             # absolute date of world t=0
@@ -43,9 +49,10 @@ from pathlib import Path
 from .constants import M_SUN
 from .system import System, Body, STAR, BODY
 from .astroframe import normalize_astro_frame
+from .wind import WindLedger
 
 FORMAT = "o2xygen-world"
-VERSION = 1
+VERSION = 2
 
 
 def _json_safe(x):
@@ -109,6 +116,7 @@ def system_to_dict(system: System) -> dict:
         bodies.append(d)
     return {"format": FORMAT, "version": VERSION, "name": system.name,
             "origin": system.origin, "bodies": bodies,
+            "wind": system.wind.to_dict(),
             "astro_frame": normalize_astro_frame(system.astro_frame)}
 
 
@@ -128,6 +136,8 @@ def dict_to_system(d: dict) -> System:
         raise ValueError(f"world version {d['version']} > supported {VERSION}")
     system = System(d["name"], origin=d.get("origin"))
     system.astro_frame = normalize_astro_frame(d.get("astro_frame"))
+    # v1 has no wind field: it starts a new zero-wind conservation baseline.
+    system.wind = WindLedger.from_dict(d.get("wind"))
     for bd in d["bodies"]:
         kind = bd["kind"]
         if kind not in (STAR, BODY):

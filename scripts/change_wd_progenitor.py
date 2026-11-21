@@ -53,13 +53,12 @@ def main():
         b.luminosity_w = props.luminosity_w
         b.extra["teff_k"] = props.teff_k
         b.extra["luminosity_w"] = props.luminosity_w
-        ws.sim.update_masses({b.name: mw_new})
+        ws.sim.update_masses({b.name: mw_new}, record_wind=False)
         for p, vel in ((ps[iv], vv_new), (ps[iw], vw_new)):
             p.vx, p.vy, p.vz = [float(x) for x in vel]
         new_el = rv_to_elements(r, v_new, G * (mv + mw_new))
         p_after = sum(p.m * np.array(p.vxyz) for p in ps)
-        ws.sim._cp_times = [ws.sim.t_s]
-        ws.sim._cp_snaps = [ws.sim._snapshot()]
+        ws.sim.reset_conservation_epoch(recenter=True)
         ws._trail_cache = None
 
     path = app.world_mod.save_world(ws.snapshot_for_save(),

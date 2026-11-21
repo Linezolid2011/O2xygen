@@ -504,7 +504,8 @@ def api_star_edit(body):
     Fe/H, epoch age) and spin are editable. Current mass/radius/luminosity/
     Teff are MIST OUTPUTS and are never accepted as editable inputs. Off-grid
     inputs are clamped to the nearest covered point by MistGrid.
-    Position/velocity remain immutable."""
+    Relative position/velocity remain immutable; saving starts a new
+    rest-barycentric conservation epoch with an empty wind ledger."""
     if _evolution_active():
         raise HttpError(409, "推演进行中,不能编辑恒星")
     name = _body_str(body, "name", required=True)
@@ -580,10 +581,11 @@ def api_star_edit(body):
         b.extra["teff_k"] = p.teff_k
         b.extra["luminosity_w"] = b.luminosity_w
         b.set_spin_vector(axis * rate, b.spin_phase_rad)
-        WS.sim.update_masses({name: b.mass_kg})
-        # archived snapshots contain the OLD mass; never restore them
-        WS.sim._cp_times = [WS.sim.t_s]
-        WS.sim._cp_snaps = [WS.sim._snapshot()]
+        WS.sim.update_masses({name: b.mass_kg}, record_wind=False)
+        # A manual edit is NOT a wind event.  Establish a new closed-system
+        # baseline: clear old wind, set Q=P=0 by a uniform translation/boost,
+        # and discard checkpoints containing the old mass and coordinates.
+        WS.sim.reset_conservation_epoch(recenter=True)
         WS._trail_cache = None
     world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
     return {"ok": True, "body": body_json(b)}
@@ -656,11 +658,10 @@ def api_add_body(body):
                        vx=vel[0], vy=vel[1], vz=vel[2])
         WS.sim._order.append(name)
         WS.sim._index[name] = len(WS.sim._order) - 1
-        # every archived checkpoint predates this body (wrong particle
-        # count) - the archive must restart from the enlarged system or a
-        # later restore would index past the old snapshots
-        WS.sim._cp_times = [WS.sim.t_s]
-        WS.sim._cp_snaps = [WS.sim._snapshot()]
+        # Adding a body is also a manual new epoch, not negative wind.  Keep
+        # all relative states, clear the old ledger and restart checkpoints
+        # (older ones have the wrong particle count and conservation basis).
+        WS.sim.reset_conservation_epoch(recenter=True)
         WS._trail_cache = None
     return {"ok": True, "name": name}
 
@@ -723,6 +724,7 @@ def api_debug_metrics():
     return {"checkpoints": len(WS.sim._cp_times),
             "sim_t_days": WS.sim.t_s / DAY,
             "checkpoint_span_days": (WS.sim._cp_times[-1] - WS.sim._cp_times[0]) / DAY if WS.sim._cp_times else 0,
+            "conservation": WS.state_at(None, with_trails=False)["conservation"],
             "rss_mb": _rss_mb()}
 
 

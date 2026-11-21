@@ -8,7 +8,8 @@ Key properties:
   * deterministic: fixed timestep, checkpointed; scrubbing backward and
     forward reproduces the same state (time-symmetric queries);
   * stellar evolution coupling: masses updated between steps (adiabatic) so
-    long timelines show genuine orbital inflation from wind mass loss;
+    long timelines show genuine orbital inflation; an aggregate escaping-wind
+    ledger closes M/P/L/Q for bodies + wind without adding wind particles;
   * osculating elements: derived outputs of the live state RELATIVE TO THE
     WORLD'S ORIGIN BODY (no parents exist anymore; see ADR-0016).
 """
@@ -21,6 +22,7 @@ import rebound
 
 from .constants import G, DAY
 from .system import System
+from .wind import WindLedger
 
 
 class IntegrateBudgetExceeded(RuntimeError):
@@ -87,6 +89,38 @@ def rv_to_elements(r_vec: np.ndarray, v_vec: np.ndarray, mu: float) -> Osculatin
     return OsculatingElements(a, e, inc, raan, argp, nu)
 
 
+def update_sim_masses(reb_sim: rebound.Simulation, index: dict[str, int],
+                      mass_kg: dict[str, float], wind: WindLedger | None,
+                      record_wind: bool = True) -> None:
+    """One mass-event implementation for live and restored simulations.
+
+    Physical evolution records the removed mass as escaping wind BEFORE
+    changing particle masses.  Epoch initialization and manual editing pass
+    ``record_wind=False`` because neither is a physical ejection event.
+    Positions and velocities are deliberately untouched (adiabatic wind).
+    """
+    names = list(mass_kg)
+    if record_wind:
+        if wind is None:
+            raise ValueError("physical wind updates require a wind ledger")
+        old, pos, vel, new = [], [], [], []
+        for name in names:
+            p = reb_sim.particles[index[name]]
+            old.append(float(p.m))
+            pos.append(np.array(p.xyz))
+            vel.append(np.array(p.vxyz))
+            new.append(float(mass_kg[name]))
+        wind.record(float(reb_sim.t), old, pos, vel, new)
+    for name in names:
+        reb_sim.particles[index[name]].m = float(mass_kg[name])
+    if getattr(reb_sim, "integrator", "") in ("whfast", "whc"):
+        # rebound 5.x: refresh Jacobi coordinates after a mass change.
+        try:
+            reb_sim.ri_whfast.recalculate_coordinates_this_timestep = 1
+        except Exception:
+            pass   # field layout differs across rebound versions
+
+
 class NBodySimulation:
     """Integrates a System live. Server-side truth for all state queries.
 
@@ -118,8 +152,11 @@ class NBodySimulation:
             self.sim.add(m=b.mass_kg, x=r[0], y=r[1], z=r[2],
                          vx=v[0], vy=v[1], vz=v[2])
         self.sim.t = 0.0
+        self.wind = system.wind.at(0.0)
 
-        # checkpoint archive: (times list, snapshot list); epoch always first
+        # checkpoint archive: (times list, snapshot list); epoch always first.
+        # Each snapshot carries its same-time wind ledger, so restoring a past
+        # query never applies the current aggregate wind to an earlier state.
         self._cp_times: list[float] = [0.0]
         self._cp_snaps: list[tuple] = [self._snapshot()]
 
@@ -167,11 +204,12 @@ class NBodySimulation:
         ps = self.sim.particles
         return (np.array([p.m for p in ps]),
                 np.array([p.xyz for p in ps]),
-                np.array([p.vxyz for p in ps]))
+                np.array([p.vxyz for p in ps]),
+                self.wind.at(float(self.sim.t)))
 
     def _restore(self, snap: tuple, t_s: float) -> rebound.Simulation:
         sim = self._fresh_sim()
-        masses, pos, vel = snap
+        masses, pos, vel = snap[:3]       # raw copies carry wind separately
         for m, r, v in zip(masses, pos, vel):
             sim.add(m=m, x=r[0], y=r[1], z=r[2], vx=v[0], vy=v[1], vz=v[2])
         sim.t = float(t_s)
@@ -271,20 +309,46 @@ class NBodySimulation:
             self.sim.integrate(t_s, exact_finish_time=1)
 
     # --------------------------------------------------------- physics hooks
-    def update_masses(self, mass_kg: dict[str, float]) -> None:
-        """Adiabatic mass change (stellar wind from MIST): positions and
-        velocities untouched; a slow M(t) inflates orbits via dynamics alone."""
-        for name, m in mass_kg.items():
-            self.sim.particles[self._index[name]].m = float(m)
-        if self.integrator == "whfast":
-            # rebound 5.x: Jacobi coordinates must be refreshed after a mass
-            # change; the field lives on sim.ri_whfast (sim.integrator is a
-            # plain string there, so the old attribute path was a silent
-            # no-op under try/except)
-            try:
-                self.sim.ri_whfast.recalculate_coordinates_this_timestep = 1
-            except Exception:
-                pass   # field layout differs across rebound versions
+    def update_masses(self, mass_kg: dict[str, float],
+                      record_wind: bool = True) -> None:
+        """Adiabatic mass change with closed-system wind accounting.
+
+        Positions and velocities stay untouched, so a slow M(t) still inflates
+        orbits via dynamics alone.  The remaining bodies are open; their lost
+        mass, momentum and moments are retained in ``self.wind``.
+        """
+        update_sim_masses(self.sim, self._index, mass_kg, self.wind,
+                          record_wind=record_wind)
+
+    def reset_conservation_epoch(self, recenter: bool = True) -> None:
+        """Establish a new manual-edit baseline without inventing wind.
+
+        A uniform translation and Galilean boost preserve every relative
+        position/velocity while setting Q=P=0.  The wind ledger is cleared
+        because an arbitrary user mass edit is a new world, not an ejection
+        history.  Checkpoints must be rebuilt after the coordinate change.
+        """
+        ps = self.sim.particles
+        if len(ps) == 0:
+            self.wind.clear(float(self.sim.t))
+            return
+        ms = np.array([p.m for p in ps])
+        pos = np.array([p.xyz for p in ps])
+        vel = np.array([p.vxyz for p in ps])
+        m_tot = float(ms.sum())
+        if not np.isfinite(m_tot) or m_tot <= 0.0:
+            raise ValueError("conservation epoch needs positive total mass")
+        vcm = (ms[:, None] * vel).sum(axis=0) / m_tot
+        rcm = (ms[:, None] * pos).sum(axis=0) / m_tot
+        for p in ps:
+            p.vx, p.vy, p.vz = [float(x) for x in
+                                (np.array(p.vxyz) - vcm)]
+            if recenter:
+                p.x, p.y, p.z = [float(x) for x in
+                                 (np.array(p.xyz) - rcm)]
+        self.wind.clear(float(self.sim.t))
+        self._cp_times = [float(self.sim.t)]
+        self._cp_snaps = [self._snapshot()]
 
     def osculating_elements(self, body_name: str,
                             ref: str | None = None) -> OsculatingElements:

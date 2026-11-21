@@ -349,6 +349,23 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.0-dev9] - 2026-11-21
+
+### 天体＋逃逸风封闭守恒(ADR-0030,用户裁定)
+
+- 新增聚合逃逸风账本 `WindLedger(t_s,M,P,L,Q)`:剩余天体仍是开放系统,
+  差异风损可改变其质量/动量/角动量/质心;天体＋风的总量守恒,风质量矩
+  在事件间按 `Q += P*dt` 弹道传播,角动量统一相对固定世界原点。
+- 质量事件在 live、未来查询和温度采样副本间共用同一实现;检查点携带
+  同刻账本,schema v2 持久化风历史,epoch rebase 不重复传播,取消回滚
+  自动恢复上次自动存档的账本。初始 MIST settle 不再制造幽灵风。
+- 人工编辑/添加天体开启新守恒基准:清空历史风、统一平移/加速令 Q=P=0,
+  保持相对状态;人工增质量不会被记成负风。
+- 总角动量覆盖轨道＋自转＋风;结构更新采用无力矩 `I*omega` 闭合,
+  潮汐继续只负责自转↔轨道交换。
+- `/api/state` 新增 bodies/wind/total 守恒诊断,`/api/debug/metrics`
+  同步公开;新增 6 组专项测试,全套 100 项通过。
+
 ## [0.3.0-dev8] - 2026-11-21
 
 ### EEP 分段年龄轨道与实时预览(ADR-0029)
@@ -555,6 +572,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
+[0.3.0-dev9]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev9
 [0.3.0-dev8]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev8
 [0.3.0-dev7]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev7
 [0.3.0-dev6]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev6

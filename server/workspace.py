@@ -7,7 +7,8 @@ The live clock moves only through the evolution job (or advance_to, the
 explicit destructive mutator used by tests/tools). Stellar evolution (MIST)
 is applied adiabatically at a fixed cadence while integrating forward, so
 star masses/luminosities - and therefore orbits - genuinely evolve along
-the timeline.
+the timeline. Escaping-wind integrals travel with every live/copy/checkpoint
+state so bodies + wind form the closed conservation system (ADR-0030).
 """
 from __future__ import annotations
 
@@ -18,7 +19,8 @@ import numpy as np
 
 from o2xygen.constants import DAY, G, M_SUN
 from o2xygen.nbody import (NBodySimulation, IntegrateBudgetExceeded,
-                           MAX_INTEGRATE_STEPS, rv_to_elements)
+                           MAX_INTEGRATE_STEPS, rv_to_elements,
+                           update_sim_masses)
 from o2xygen.system import System, Body, STAR
 
 EVOLVE_CADENCE_S = 1.0 * 365.25 * DAY   # stellar evolution update cadence
@@ -99,11 +101,39 @@ class Workspace:
         props = self._star_props_at(t_s)
         if not props:
             return False
-        self.sim.update_masses({n: v["mass_kg"] for n, v in props.items()})
+        # Settling MIST seed masses onto the epoch is initialization, not a
+        # new wind pulse.  In particular, a save's existing wind ledger must
+        # never receive the same historical loss a second time on reload.
+        self.sim.update_masses({n: v["mass_kg"] for n, v in props.items()},
+                               record_wind=False)
         self._apply_star_props(props)
+        self.sim._cp_times = [float(self.sim.t_s)]
+        self.sim._cp_snaps = [self.sim._snapshot()]
         return True
 
     # ---------------------------------------------------------- spin & tides
+    def _conserve_structural_spin(self, props: dict, particles, idx: dict,
+                                  spins: dict, radii: dict) -> None:
+        """Keep each star's I*omega continuous across a structure update.
+
+        MIST supplies M(t), R(t), not rotational evolution.  ADR-0030 adopts
+        the explicit zero-torque closure: isotropic wind carries translational
+        angular momentum but no additional spin torque.  Thus contraction
+        spins up and expansion spins down, and tides remain the only exchange
+        between stellar spin and orbit.  Initial MIST settlement does NOT call
+        this helper: a loaded spin already belongs to the settled epoch.
+        """
+        for name, v in props.items():
+            b = self.system.bodies[name]
+            alpha = float(b.extra.get("inertia_factor", DEFAULT_INERTIA_FACTOR))
+            old_m = float(particles[idx[name]].m)
+            old_r = float(radii.get(name, b.radius_m))
+            old_i = alpha * old_m * old_r * old_r
+            new_i = alpha * float(v["mass_kg"]) * float(v["radius_m"]) ** 2
+            sp = spins.get(name)
+            if sp is not None and old_i > 0.0 and new_i > 0.0:
+                sp["w"] = np.asarray(sp["w"], dtype=float) * (old_i / new_i)
+
     def _spin_map(self, t_s: float | None = None) -> dict[str, dict]:
         """Spin vectors/phases for every body. Between tidal cadence stops
         the rate/axis are constant, so the phase is read at t_s by linear
@@ -122,7 +152,7 @@ class Workspace:
         self._spin_epoch_s = t_s
 
     def _apply_tides(self, sim, t_from: float, t_to: float,
-                     spins: dict) -> None:
+                     spins: dict, radii: dict | None = None) -> None:
         """Constant-time-lag equilibrium tides (ADR-0023), applied as a
         secular operator split at evolution cadence stops.
 
@@ -161,7 +191,7 @@ class Workspace:
                                                DEFAULT_INERTIA_FACTOR))
             i = idx[host]
             m_i = float(ps[i].m)
-            R = float(b.radius_m)
+            R = float((radii or {}).get(host, b.radius_m))
             I = inertia_factor * m_i * R * R
             if m_i > 0.0 and R > 0.0 and I > 0.0 and k2 > 0.0 and lag > 0.0:
                 for other in names:
@@ -220,12 +250,14 @@ class Workspace:
         self._evolve_sim_between(self.sim, t_from, t_to, record=record)
 
     def _evolve_sim_between(self, sim, t_from: float, t_to: float,
-                            record: bool = False, spins: dict | None = None) -> None:
-        """Stellar-evolution + tidal cadence applied to an ARBITRARY
-        simulation object (the live NBodySimulation, or a raw rebound copy
-        used by non-destructive queries). Masses AND the catalog's displayed
-        luminosity/radius/Teff/spin are updated on the live path, so a
-        running evolution visibly ages and tidally evolves its bodies."""
+                            record: bool = False, spins: dict | None = None,
+                            wind=None, radii: dict | None = None) -> None:
+        """Evolve a live simulation or a private raw rebound copy.
+
+        Every path carries its own same-time wind ledger and radius map.  Raw
+        copies must never mutate the live ledger/catalog, but otherwise use
+        the exact same mass-event, structural-spin and tidal operators.
+        """
         if t_to <= t_from:
             return
         is_live = sim is self.sim
@@ -233,6 +265,17 @@ class Workspace:
         idx = self.sim._index                # copies share the live ordering
         if spins is None:
             spins = self._spin_map(t_from)
+        if wind is None:
+            if not is_live:
+                raise ValueError("raw evolution requires a private wind ledger")
+            wind = sim.wind
+        if radii is None:
+            radii = {n: float(b.radius_m)
+                     for n, b in self.system.bodies.items()}
+            if not is_live:
+                # A checkpoint may be older than the live catalog radius.
+                for n, v in self._star_props_at(t_from).items():
+                    radii[n] = float(v["radius_m"])
         span = t_to - t_from
         cad = max(EVOLVE_CADENCE_S, span / 200.0)
         # first cadence stop STRICTLY after t_from, and always include t_to:
@@ -245,13 +288,18 @@ class Workspace:
             self._integrate(sim, t_stop, record)
             props = self._star_props_at(t_stop)
             if props:
+                self._conserve_structural_spin(props, particles, idx,
+                                               spins, radii)
+                masses = {k: v["mass_kg"] for k, v in props.items()}
                 if is_live:
-                    sim.update_masses({k: v["mass_kg"] for k, v in props.items()})
+                    sim.update_masses(masses, record_wind=True)
                     self._apply_star_props(props)
                 else:
-                    for k, v in props.items():
-                        particles[idx[k]].m = v["mass_kg"]
-            self._apply_tides(sim, prev, t_stop, spins)
+                    update_sim_masses(sim, idx, masses, wind,
+                                      record_wind=True)
+                radii.update({k: float(v["radius_m"])
+                              for k, v in props.items()})
+            self._apply_tides(sim, prev, t_stop, spins, radii=radii)
             prev = t_stop
             if t_stop >= t_to:
                 break
@@ -284,17 +332,20 @@ class Workspace:
             self._trail_cache = None
 
     def _copy_at(self, t_s: float):
-        """(raw rebound sim, spin map) at t_s, never touching the live
-        integrator. Future queries start from the LIVE snapshot (current
-        spin state included); past queries restore the nearest checkpoint.
-        Spin is not archived historically, so a past view carries the
-        current spin metadata - only the dynamics are rewound."""
+        """(raw rebound sim, spin map, wind ledger) at t_s.
+
+        Future queries start from the LIVE snapshot; past queries restore the
+        nearest checkpoint's same-time ledger.  Spin is not archived
+        historically, so a past view still carries current spin metadata.
+        """
         now = self.sim.t_s
         if t_s >= now:
-            sim = self.sim._restore(self.sim._snapshot(), now)
+            snap = self.sim._snapshot()
+            sim = self.sim._restore(snap, now)
             spins = self._spin_map(now)
-            self._evolve_sim_between(sim, now, t_s, spins=spins)
-            return sim, spins
+            wind = snap[3].copy()
+            self._evolve_sim_between(sim, now, t_s, spins=spins, wind=wind)
+            return sim, spins, wind
         cp = self.sim._cp_times
         i = max(0, bisect_right(cp, t_s) - 1)
         need = int(abs(t_s - cp[i]) / self.sim.dt_s) + 1
@@ -304,14 +355,16 @@ class Workspace:
                 f"checkpoint needs ~{need} steps > budget "
                 f"{MAX_INTEGRATE_STEPS} (dt={self.sim.dt_s/DAY:.3g} d): "
                 "shrink the span or raise dt")
-        sim = self.sim._restore(self.sim._cp_snaps[i], cp[i])
+        snap = self.sim._cp_snaps[i]
+        sim = self.sim._restore(snap, cp[i])
         spins = self._spin_map(now)
+        wind = snap[3].copy()
         if t_s >= cp[i]:
-            self._evolve_sim_between(sim, cp[i], t_s, spins=spins)
+            self._evolve_sim_between(sim, cp[i], t_s, spins=spins, wind=wind)
         else:                                   # before the epoch: plain rewind
             sim.dt = -abs(self.sim.dt_s)
             sim.integrate(t_s, exact_finish_time=1)
-        return sim, spins
+        return sim, spins, wind
 
     def state_at(self, t_days: float | None, with_trails: bool = True) -> dict:
         """State snapshot at t_days (positions, velocities, masses,
@@ -327,13 +380,59 @@ class Workspace:
                 t_s = self.sim.t_s
                 sim = self.sim
                 spins = self._spin_map(t_s)
+                wind = self.sim.wind
             else:
                 t_s = float(t_days) * DAY
-                sim, spins = self._copy_at(t_s)
-            return self._snapshot_dict(sim, t_s, with_trails, spins)
+                sim, spins, wind = self._copy_at(t_s)
+            return self._snapshot_dict(sim, t_s, with_trails, spins, wind)
+
+    def _conservation_dict(self, names: list[str], ms: np.ndarray,
+                           pos: np.ndarray, vel: np.ndarray, spins: dict,
+                           star_props: dict, wind, t_s: float) -> dict:
+        """Open-body and closed bodies+wind integrals about the fixed origin."""
+        def vec(a):
+            return [float(x) for x in np.asarray(a).reshape(3)]
+
+        mass_b = float(ms.sum())
+        p_b = (ms[:, None] * vel).sum(axis=0)
+        q_b = (ms[:, None] * pos).sum(axis=0)
+        l_orbit_b = (ms[:, None] * np.cross(pos, vel)).sum(axis=0)
+        l_spin_b = np.zeros(3)
+        for k, name in enumerate(names):
+            b = self.system.bodies[name]
+            alpha = float(b.extra.get("inertia_factor", DEFAULT_INERTIA_FACTOR))
+            radius = float(star_props.get(name, {}).get("radius_m", b.radius_m))
+            inertia = alpha * float(ms[k]) * radius * radius
+            l_spin_b += inertia * np.asarray(spins[name]["w"], dtype=float)
+        w = (wind if wind is not None else self.sim.wind).at(t_s)
+        mass_tot = mass_b + w.mass_kg
+        p_tot = p_b + w.momentum_kg_m_s
+        q_tot = q_b + w.first_moment_kg_m
+        l_orbit_tot = l_orbit_b + w.angular_momentum_kg_m2_s
+        l_tot = l_orbit_tot + l_spin_b
+        return {
+            "bodies": {
+                "mass_kg": mass_b,
+                "momentum_kg_m_s": vec(p_b),
+                "orbital_angular_momentum_kg_m2_s": vec(l_orbit_b),
+                "spin_angular_momentum_kg_m2_s": vec(l_spin_b),
+                "first_moment_kg_m": vec(q_b),
+                "barycenter_m": vec(q_b / mass_b),
+            },
+            "wind": w.to_dict(),
+            "total": {
+                "mass_kg": mass_tot,
+                "momentum_kg_m_s": vec(p_tot),
+                "orbital_angular_momentum_kg_m2_s": vec(l_orbit_tot),
+                "spin_angular_momentum_kg_m2_s": vec(l_spin_b),
+                "angular_momentum_kg_m2_s": vec(l_tot),
+                "first_moment_kg_m": vec(q_tot),
+                "barycenter_m": vec(q_tot / mass_tot),
+            },
+        }
 
     def _snapshot_dict(self, sim, t_s: float, with_trails: bool,
-                       spins: dict | None = None) -> dict:
+                       spins: dict | None = None, wind=None) -> dict:
         """Serialise a sim object (live NBodySimulation or raw rebound copy)
         sitting at t_s into the /api/state payload."""
         live = sim is self.sim
@@ -415,6 +514,8 @@ class Workspace:
                 "radius_m": float(p["radius_m"]) if p else float(s.radius_m),
                 "luminosity_w": float(p["luminosity_w"]) if p else float(s.luminosity_w),
             }
+        conservation = self._conservation_dict(
+            names_order, ms, pos_arr, vel_arr, spins, props, wind, t_s)
         return {
             "t_days": float(t_s / DAY),
             "dt_s": float(self.sim.dt_s),
@@ -422,6 +523,7 @@ class Workspace:
             "elements": elements,
             "stars": stars,
             "spins": spin_json,
+            "conservation": conservation,
             "trails": self._trails(sim, states, periods, t_s) if with_trails else {},
             "luminosity_w": {s.name: stars[s.name]["luminosity_w"]
                              for s in self.system.stars()},
@@ -546,6 +648,10 @@ class Workspace:
             states = self.sim.live_state()
             spins = self._spin_map(self.sim.t_s)
             out = System(self.system.name, origin=self.system.origin)
+            # Rebase only the ledger clock.  Q(T), P, L and M are copied at
+            # the SAME live epoch; adding P*T again would double-propagate it.
+            out.wind = self.sim.wind.at(self.sim.t_s)
+            out.wind.time_s = 0.0
             # the save becomes a new t=0: advance the absolute astronomical
             # epoch too, or a reload would silently reset any future sky catalog
             from o2xygen.astroframe import advance_epoch
@@ -583,8 +689,10 @@ class Workspace:
         # the user switched between non-star bodies (2026-11-17 report).
         with self.lock:
             t0 = self.sim.t_s
-            sim = self.sim._restore(self.sim._snapshot(), t0)
+            snap = self.sim._snapshot()
+            sim = self.sim._restore(snap, t0)
             spins = self._spin_map(t0)
+            wind = snap[3].copy()
             idx = self.sim._index
             star_names = [s.name for s in self.system.stars()]
             # fallback luminosities when the MIST grid is unavailable
@@ -593,7 +701,7 @@ class Workspace:
         prev = t0
         for i in range(n):
             t = t0 + span_days * DAY * i / max(n - 1, 1)
-            self._evolve_sim_between(sim, prev, t, spins=spins)
+            self._evolve_sim_between(sim, prev, t, spins=spins, wind=wind)
             sim.integrate(t, exact_finish_time=1)   # raw copy: no archive
             prev = t
             ps = sim.particles
