@@ -37,6 +37,28 @@ def resolve_stellar(mini_msun: float, feh: float, age_yr: float,
             if formation is not None else None}
 
 
+def segments_with_wd_stage(segments: list[dict], formation_age_yr: float | None) -> list[dict]:
+    """Append/truncate the display track with a WD stage after formation.
+    This is a view of the lifecycle, never a second age input."""
+    if formation_age_yr is None or not segments:
+        return segments
+    import numpy as np
+    logform = float(np.log10(formation_age_yr))
+    end = max(max(s["end_logage"] for s in segments),
+              np.log10(200.0 * 1e9))  # editor's 200 Gyr display horizon
+    if logform >= end:
+        return segments
+    out = []
+    for s in segments:
+        if s["end_logage"] <= logform:
+            out.append(dict(s))
+        elif s["start_logage"] < logform:
+            out.append({**s, "end_logage": logform})
+    out.append({"start_logage": logform, "end_logage": end,
+                "key": "wd", "label": "白矮星", "color": "#c9d6ff"})
+    return out
+
+
 def evaluate_stellar(mini_msun: float, feh: float, age_yr: float,
                      mist, wd, cool, extra: dict | None = None):
     r = resolve_stellar(mini_msun, feh, age_yr, mist, wd, cool, extra)

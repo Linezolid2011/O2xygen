@@ -14,6 +14,25 @@ from .constants import R_SUN, L_SUN
 
 AGE_MIN, AGE_MAX = 1e6, 1.4e10          # yr, MIST coverage
 
+# Broad, deliberately coarse EEP stages for display. MIST's EEP numbering is
+# used as the data source; these are not fractional "progress" estimates.
+_PHASE_STEPS = (
+    (202.0, "pms", "前主序", "#6b8de8"),
+    (353.0, "ms", "主序", "#f0d58a"),
+    (454.0, "rgb", "红巨星", "#e89b63"),
+    (631.0, "helium", "氦燃烧", "#d9795f"),
+    (808.0, "agb", "AGB", "#c77a9a"),
+    (1409.0, "post_agb", "后AGB", "#b59ade"),
+    (float("inf"), "wd", "白矮星", "#c9d6ff"),
+)
+
+
+def phase_from_eep(eep: float) -> dict:
+    for limit, key, label, color in _PHASE_STEPS:
+        if eep < limit:
+            return {"key": key, "label": label, "color": color}
+    return {"key": "wd", "label": "白矮星", "color": "#c9d6ff"}
+
 
 def _find_column_row(lines: list[str]) -> int:
     """Locate the header row naming columns inside a MIST .eep file."""
@@ -46,7 +65,7 @@ def load_track(path: Path) -> np.ndarray:
     age_col = "star_age" if "star_age" in idx else ("age" if "age" in idx else "log10_age")
     out = np.empty(len(data), dtype=[("age_yr", "f8"), ("mini", "f8"),
                                      ("logR", "f8"), ("logL", "f8"),
-                                     ("logTeff", "f8"), ("mdot", "f8")])
+                                     ("logTeff", "f8"), ("mdot", "f8"), ("eep", "f8")])
     if age_col == "log10_age":
         out["age_yr"] = 10.0 ** data[:, idx[age_col]]
     else:
@@ -56,6 +75,10 @@ def load_track(path: Path) -> np.ndarray:
     out["logL"] = data[:, idx["log_L"]]
     out["logTeff"] = data[:, idx["log_Teff"]]
     out["mdot"] = data[:, idx["star_mdot"]] if "star_mdot" in idx else 0.0
+    # MIST EEP files are chronological rows; the EEP number is the original
+    # row index (the EEPs header lists the milestone rows). Preserve it so
+    # evolutionary stages can be read from the track rather than guessed.
+    out["eep"] = np.arange(1, len(out) + 1, dtype=float)
     # keep only in-range ages; drop duplicated/zero-age artefacts
     keep = (out["age_yr"] >= AGE_MIN * 0.5) & (out["age_yr"] <= AGE_MAX)
     return out[keep]
@@ -80,6 +103,7 @@ class MistGrid:
     Delaunay scatter interpolation is NOT - its triangles span wildly
     different ages between neighbouring tracks and corrupts R/L badly).
     """
+    cache_version = 2       # EEP-carrying parser; invalidates old pickles
 
     _FIELDS = ("logR", "logL", "logTeff", "logm", "logmdot")
 
@@ -89,6 +113,7 @@ class MistGrid:
         # per feh: (minis_sorted, list per track of (logages, {field: values}))
         self._tracks: dict[float, tuple[np.ndarray, list]] = {}
         self._mini_ranges: dict[float, tuple[float, float]] = {}
+        self._phase_cache = {}
         for feh, d in track_dirs.items():
             minis, table = [], []
             for f in sorted(Path(d).rglob("*.track.eep")):
@@ -105,6 +130,7 @@ class MistGrid:
                     # MESA reports dM/dt: negative during wind mass loss.
                     # Loss rate is quoted positive -> interpolate |mdot|.
                     "logmdot": np.log10(np.maximum(np.abs(tr["mdot"][order]), 1e-30)),
+                    "eep": tr["eep"][order],
                 }
                 minis.append(float(tr["mini"][0]))
                 table.append((logages, entry))
@@ -206,6 +232,60 @@ class MistGrid:
             logage = (1 - w) * a0 + w * a1
             logm = (1 - w) * m0 + w * m1
         return {"age_yr": 10.0 ** logage, "mass_msun": 10.0 ** logm}
+
+    def _phase_at_feh(self, feh: float, mini: float, logage: float) -> float:
+        """Interpolate the EEP number itself at a given mass and age."""
+        minis, table = self._tracks[feh]
+        use = [(mi, np.interp(logage, logages,
+                              entry.get("eep", np.arange(1, len(logages) + 1))))
+               for mi, (logages, entry) in zip(minis, table)
+               if logages[0] <= logage <= logages[-1]]
+        if not use:
+            k = min(range(len(table)),
+                    key=lambda j: (abs(minis[j] - mini),
+                                   min(abs(logage - table[j][0][0]),
+                                       abs(logage - table[j][0][-1]))))
+            ages = table[k][0]
+            return self._phase_at_feh(feh, mini,
+                                      float(np.clip(logage, ages[0], ages[-1])))
+        mini_eval = float(np.clip(mini, min(x[0] for x in use),
+                                  max(x[0] for x in use)))
+        if len(use) == 1:
+            return float(use[0][1])
+        return float(np.interp(mini_eval, [x[0] for x in use],
+                               [x[1] for x in use]))
+
+    def phase_at(self, mini_msun: float, feh: float, age_yr: float) -> dict:
+        mini, feh, age_yr = self.clamp_inputs(mini_msun, feh, age_yr)
+        logage = float(np.log10(age_yr))
+        lo = max(f for f in self.fehs if f <= feh)
+        hi = min(f for f in self.fehs if f >= feh)
+        eep = self._phase_at_feh(lo, mini, logage) if lo == hi else \
+            (1.0 - (feh - lo) / (hi - lo)) * self._phase_at_feh(lo, mini, logage) \
+            + ((feh - lo) / (hi - lo)) * self._phase_at_feh(hi, mini, logage)
+        out = phase_from_eep(eep)
+        out["eep"] = float(eep)
+        return out
+
+    def phase_segments(self, mini_msun: float, feh: float) -> list[dict]:
+        """Contiguous broad EEP stages over the MIST age range, cached per
+        initial mass/metallicity so dragging the age control is cheap."""
+        key = (round(float(mini_msun), 4), round(float(feh), 4))
+        if not hasattr(self, "_phase_cache"):
+            self._phase_cache = {}       # old pickled grids remain loadable
+        if key in self._phase_cache:
+            return self._phase_cache[key]
+        xs = np.linspace(np.log10(AGE_MIN), np.log10(AGE_MAX), 180)
+        stages = [self.phase_at(mini_msun, feh, float(10.0 ** x)) for x in xs]
+        out = []
+        for i, stage in enumerate(stages):
+            if out and out[-1]["key"] == stage["key"]:
+                out[-1]["end_logage"] = float(xs[i])
+            else:
+                out.append({"start_logage": float(xs[i]),
+                            "end_logage": float(xs[i]), **stage})
+        self._phase_cache[key] = out
+        return out
 
     def solve_age(self, mini_msun: float, feh: float,
                   luminosity_lsun: float, teff_k: float,

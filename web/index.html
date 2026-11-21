@@ -94,11 +94,10 @@
                 <label>[Fe/H]<input id="sx-feh" type="number" step="any"></label>
                 <label>当前总年龄 (Gyr)<input id="sx-age" type="number" step="any"></label>
               </div>
-              <label class="field">年龄滑块（对数刻度；仅辅助输入）
-                <input id="sx-age-slider" type="range" min="0" max="1000" step="1" value="0">
+              <label class="field">年龄轨道（对数刻度 · 分段阶段 · 可拖动）
+                <input id="sx-age-slider" class="life-slider" type="range" min="0" max="1000" step="1" value="0">
               </label>
-              <div class="life-track"><span id="sx-life-marker"></span></div>
-              <div class="life-caption"><span id="sx-age-range">0.001–200 Gyr</span><span>年龄改变生命周期，不改变存档结构</span></div>
+              <div class="life-caption"><span id="sx-age-range">0.001–200 Gyr</span><span id="sx-phase">当前阶段</span></div>
             </section>
             <section class="editor-card">
               <div class="sec-title">WDCool 后备</div>

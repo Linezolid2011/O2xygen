@@ -94,8 +94,10 @@ def _load_grid():
         src_mtime = max(d.stat().st_mtime for d in dirs.values())
         if cache.exists() and cache.stat().st_mtime > src_mtime:
             with open(cache, "rb") as f:
-                _GRID["grid"] = pickle.load(f)
-        else:
+                candidate = pickle.load(f)
+            if getattr(candidate, "cache_version", 0) >= 2:
+                _GRID["grid"] = candidate
+        if _GRID["grid"] is None:
             grid = MistGrid(dirs)
             with open(cache, "wb") as f:
                 pickle.dump(grid, f, protocol=5)
@@ -474,9 +476,15 @@ def api_star_preview(body):
                               body=SimpleNamespace(extra=extra))
     except ValueError as e:
         raise HttpError(400, str(e))
-    from o2xygen.lifecycle import resolve_stellar
+    from o2xygen.lifecycle import resolve_stellar, segments_with_wd_stage
     meta = resolve_stellar(mini, feh, age_yr, _grid_getter(),
                            _GRID["wd_grid"], _GRID["cool_grid"], extra)
+    if meta["model"] == "mist":
+        phase = _GRID["grid"].phase_at(mini, feh, age_yr)
+    else:
+        phase = {"key": "wd", "label": "白矮星", "color": "#c9d6ff"}
+    segments = _GRID["grid"].phase_segments(mini, feh)
+    segments = segments_with_wd_stage(segments, meta["formation_age_yr"])
     return {"name": name, "mass_msun": p.mass_msun,
             "radius_rsun": p.radius_m / R_SUN,
             "luminosity_lsun": p.luminosity_w / L_SUN,
@@ -487,7 +495,8 @@ def api_star_preview(body):
                                    else meta["formation_age_yr"] / 1e9,
             "covered_by_mist3": meta["covered_by_mist3"],
             "cooling_age_gyr": None if meta["cooling_age_yr"] is None
-                                 else meta["cooling_age_yr"] / 1e9}
+                                 else meta["cooling_age_yr"] / 1e9,
+            "phase": phase, "phase_segments": segments}
 
 
 def api_star_edit(body):

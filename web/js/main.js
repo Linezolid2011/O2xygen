@@ -399,8 +399,11 @@ async function boot() {
   const starSaveBtn = $("#star-edit-save");
   const starPreviewBtn = $("#star-edit-preview");
   let starDraftName = null;
+  let previewSerial = 0, previewTimer = null;
 
   function closeStarEditor() {
+    previewSerial++;                         // invalidate in-flight previews
+    clearTimeout(previewTimer);
     starEditor.hidden = true;
     starDraftName = null;
     starEditStatus.textContent = "";
@@ -413,7 +416,10 @@ async function boot() {
       document.getElementById(id).disabled = !on || derived;
     }
   }
-  $("#sx-use-wdcool").addEventListener("change", updateWDCoolEditability);
+  $("#sx-use-wdcool").addEventListener("change", () => {
+    updateWDCoolEditability();
+    schedulePreview();
+  });
 
   const AGE_LOG_MIN = -3.0, AGE_LOG_MAX = Math.log10(200.0);
   function updateAgeSlider() {
@@ -422,14 +428,38 @@ async function boot() {
     const frac = Math.max(0, Math.min(1,
       (Math.log10(age) - AGE_LOG_MIN) / (AGE_LOG_MAX - AGE_LOG_MIN)));
     $("#sx-age-slider").value = Math.round(frac * 1000);
-    $("#sx-life-marker").style.left = `${frac * 100}%`;
   }
-  $("#sx-age").addEventListener("input", updateAgeSlider);
+  function schedulePreview() {
+    updateAgeSlider();
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => previewStar(), 80);
+  }
+  $("#sx-age").addEventListener("input", schedulePreview);
+  for (const id of ["sx-mini", "sx-feh"]) {
+    document.getElementById(id).addEventListener("input", schedulePreview);
+  }
   $("#sx-age-slider").addEventListener("input", () => {
     const v = Number($("#sx-age-slider").value) / 1000;
     $("#sx-age").value = 10 ** (AGE_LOG_MIN + v * (AGE_LOG_MAX - AGE_LOG_MIN));
-    updateAgeSlider();
+    schedulePreview();
   });
+
+  function setLifecycleTrack(r) {
+    const slider = $("#sx-age-slider");
+    const stops = [];
+    for (const seg of r.phase_segments ?? []) {
+      // MIST phase segments use log10(YEARS); this control uses log10(GYR)
+      const a = Math.max(0, Math.min(100,
+        (seg.start_logage - 9.0 - AGE_LOG_MIN) / (AGE_LOG_MAX - AGE_LOG_MIN) * 100));
+      const b = Math.max(0, Math.min(100,
+        (seg.end_logage - 9.0 - AGE_LOG_MIN) / (AGE_LOG_MAX - AGE_LOG_MIN) * 100));
+      if (b > a && b > 0 && a < 100) stops.push(`${seg.color} ${a}% ${b}%`);
+    }
+    if (stops.length) slider.style.setProperty("--life-gradient",
+      `linear-gradient(90deg, ${stops.join(", ")})`);
+    slider.style.setProperty("--star-color", `#${teffColor(r.teff_k).getHexString()}`);
+    $("#sx-phase").textContent = r.phase?.label ?? "—";
+  }
 
   async function openStarEditor(name) {
     starDraftName = name;
@@ -503,9 +533,11 @@ async function boot() {
     }
     starPreviewBtn.disabled = true;
     starEditStatus.textContent = "正在预览（不保存）…";
+    const serial = ++previewSerial;
     try {
       const r = await api.starPreview(payload);
-      if (starDraftName !== name) return;
+      window.__lastStarPreview = r;       // debug/test hook, not saved state
+      if (serial !== previewSerial || starDraftName !== name) return;
       // preview is a draft-only readback; never update the saved catalog here
       $("#sx-mass").value = r.mass_msun;
       $("#sx-radius").value = r.radius_rsun;
@@ -517,8 +549,10 @@ async function boot() {
         `${r.cooling_age_gyr.toExponential(4)} Gyr`;
       const modelText = { mist: "MIST 轨道", mist3_wd: "MIST III · WD 冷却",
                           wdcool: "WDCool · WD 冷却" };
-      $("#star-edit-model").textContent = modelText[r.model] ?? r.model;
+      $("#star-edit-model").textContent =
+        `${modelText[r.model] ?? r.model} · ${r.phase?.label ?? "—"}`;
       $("#star-edit-swatch").style.background = `#${teffColor(r.teff_k).getHexString()}`;
+      setLifecycleTrack(r);
       if (r.wd_mass_msun != null) $("#sx-wd-mass").value = r.wd_mass_msun;
       if (r.formation_age_gyr != null) $("#sx-wd-formation").value = r.formation_age_gyr;
       window.__wdcoolInput = {
@@ -539,6 +573,8 @@ async function boot() {
   starSaveBtn.addEventListener("click", async () => {
     const name = starDraftName;
     if (!name || appMode !== "edit") return;
+    previewSerial++;                         // no preview may win over a save
+    clearTimeout(previewTimer);
     const payload = draftPayload();
     const values = [...Object.values(payload).filter((v) => typeof v === "number"),
                     ...payload.spin_axis];

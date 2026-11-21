@@ -85,3 +85,14 @@ def test_evaluate_clamps_off_grid_inputs_to_nearest_grid_point(grid):
     assert grid.evaluate(1.0, 0.0, 1.0e12) == grid.evaluate(1.0, 0.0, 1.4e10)
     assert grid.evaluate(1.0, -5.0, 4.56e9) == grid.evaluate(1.0, 0.0, 4.56e9)
     assert grid.evaluate(1.0, 99.0, 4.56e9) == grid.evaluate(1.0, 0.25, 4.56e9)
+
+
+def test_eep_phase_and_segments(grid):
+    """MIST EEPs drive broad lifecycle stages and cached display segments."""
+    assert grid.phase_at(1.0, 0.0, 1.0e6)["key"] == "pms"
+    assert grid.phase_at(1.0, 0.0, 3.0e9)["key"] == "ms"
+    assert grid.phase_at(1.0, 0.0, 1.4e10)["key"] in {"wd", "post_agb", "agb"}
+    seg = grid.phase_segments(1.0, 0.0)
+    assert len(seg) >= 3
+    assert all(s["end_logage"] >= s["start_logage"] for s in seg)
+    assert grid.phase_segments(1.0, 0.0) is seg   # cached, not recomputed

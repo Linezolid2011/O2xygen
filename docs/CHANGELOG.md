@@ -349,6 +349,20 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.0-dev8] - 2026-11-21
+
+### EEP 分段年龄轨道与实时预览(ADR-0029)
+
+- 删除上下重复的两条年龄条,合并为单个可拖动轨道;按 MIST EEP 数据
+  粗分前主序/主序/红巨星/氦燃烧/AGB/后 AGB/WD,WD 尾段延伸至
+  200 Gyr 显示上限。
+- 光标颜色由当前年龄 Teff 映射;当前阶段标签与模型标签同步。
+- 年龄输入或拖动触发 80 ms 防抖预览,旧响应按序号丢弃,不保存。
+- MIST 解析保存原始 EEP 编号并升级缓存 cache_version=2,阶段边界按
+  初始质量/[Fe/H] 缓存;修复 log(年)→log(Gyr) 分段单位转换。
+- Playwright 实测拖动、分段、光标变色、自动更新及关闭不保存;
+  新增 EEP 阶段测试,总测试数 94。
+
 ## [0.3.0-dev7] - 2026-11-21
 
 ### 恒星编辑器交互与预览(参考 ORBIT 的信息层级,不照搬其模型)
@@ -541,6 +555,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
+[0.3.0-dev8]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev8
 [0.3.0-dev7]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev7
 [0.3.0-dev6]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev6
 [0.3.0-dev5]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev5
