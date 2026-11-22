@@ -349,6 +349,13 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.2-rc1] - 2026-11-22
+
+### 候选版本标识（非正式 Release）
+
+- 当前开发线标记为 **0.3.2-rc1**,仅表示 release candidate;不创建正式
+  Release。包含固定世界原点、纯客户端烟迹、双栏添加天体与 Ctrl+C 确认。
+
 ## [0.3.0-dev17] - 2026-11-22
 
 ### Ctrl+C 关闭确认
@@ -666,6 +673,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 回扫成本有安全阀(单次 ≤~2000 次积分调用);窗口集合变化 >10% 时缓存
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
+[0.3.2-rc1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.2-rc1
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
 [0.3.0-dev17]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev17
 [0.3.0-dev16]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev16
