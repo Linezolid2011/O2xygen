@@ -33,7 +33,7 @@ def main(apply=False):
     live_path = ROOT / ".data" / "worlds" / "白玫瑰.oxygen"
     ws = Workspace(world_mod.load_world(live_path), grid_getter=lambda: mist,
                    wd_grid_getter=lambda: wd, cool_grid_getter=lambda: cool)
-    ws.state_at(None, with_trails=False)
+    ws.state_at(None)
     dt_before = ws.sim.dt_s
     candidate = ws.snapshot_for_save()
     states = {n: (b.pos0.copy(), b.vel0.copy()) for n, b in candidate.bodies.items()}
@@ -72,9 +72,8 @@ def main(apply=False):
 
     candidate_ws = Workspace(candidate, grid_getter=lambda: mist,
                              wd_grid_getter=lambda: wd, cool_grid_getter=lambda: cool)
-    candidate_ws.state_at(None, with_trails=False)
+    candidate_ws.state_at(None)
     candidate_ws.sim.reset_conservation_epoch(recenter=True)
-    candidate_ws._trail_cache = None
     candidate_dir = ROOT / ".data" / "candidates"
     candidate_dir.mkdir(parents=True, exist_ok=True)
     candidate_path = candidate_dir / "白玫瑰-inclined.oxygen"
@@ -85,7 +84,7 @@ def main(apply=False):
     reload_ws = Workspace(world_mod.load_world(candidate_path),
                           grid_getter=lambda: mist,
                           wd_grid_getter=lambda: wd, cool_grid_getter=lambda: cool)
-    reload_ws.state_at(None, with_trails=False)
+    reload_ws.state_at(None)
     dt_reloaded = reload_ws.sim.dt_s
     period_s = 2.0 * np.pi / n_s
     result = {

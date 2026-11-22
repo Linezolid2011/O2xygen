@@ -55,9 +55,9 @@ async function boot() {
 
   // ---- server-driven rendering (ADR-0021) ----
   // The server is the ONLY computer. An SSE stream pushes authoritative
-  // poses (~60 Hz while the clock moves) and server-integrated trails; the
-  // client integrates nothing, extrapolates nothing, and has no render clock
-  // of its own - currentDays IS the server's sim time. The 800 ms poll
+  // poses (~60 Hz while the clock moves); the client only retains those poses
+  // as a finite trail history. It integrates/extrapolates nothing and has no
+  // render clock of its own - currentDays IS the server's sim time. The poll
   // remains for meta (star display props) and as the degraded fallback if
   // the stream dies.
   let selected = null;
@@ -86,16 +86,17 @@ async function boot() {
 
   const es = new EventSource("/api/stream");
   window.__stream = es;        // debug/test hook
+  es.onopen = () => {
+    streamLive = true;
+    scene.clearTrails();          // a new stream is a new history session
+  };
   es.addEventListener("pose", (e) => {
     const m = JSON.parse(e.data);
     streamLive = true;
     currentDays = m.t_days;
     scene.setPose(m.p, m.t_days, m.bcm);
   });
-  es.addEventListener("trails", (e) => {
-    scene.updateTrails(JSON.parse(e.data));
-  });
-  es.onerror = () => { streamLive = false; };   // poll fallback covers meta
+  es.onerror = () => { streamLive = false; };   // poll fallback covers poses/meta
 
   // ---- meta poll (800 ms): star display props, fallback pose/trails, and
   // the evolution watchdog (a job started elsewhere must attach this UI) ----
@@ -112,8 +113,7 @@ async function boot() {
       const snap = await api.state(null);
       if (!streamLive) {
         currentDays = snap.t_days;          // degraded mode: poll owns data
-        scene.setSnapshot(snap);            //   (sets fallback pose too)
-        scene.updateTrails(snap);
+        scene.setSnapshot(snap, true);       //   (records fallback poses too)
       } else {
         scene.setSnapshot(snap);            // meta only: stars/radius/Teff
       }
@@ -183,7 +183,6 @@ async function boot() {
   }, 250);
   (function frame() {
     scene.update(currentDays);
-    scene.drawTrails();
     scene.render();
     requestAnimationFrame(frame);
   })();

@@ -68,7 +68,7 @@ def main(apply=False):
     system = world_mod.load_world(live_path)
     ws = Workspace(system, grid_getter=lambda: mist,
                    wd_grid_getter=lambda: wd, cool_grid_getter=lambda: cool)
-    ws.state_at(None, with_trails=False)
+    ws.state_at(None)
     candidate = ws.snapshot_for_save()
 
     names = ["Αστραία", "Vesper", "Εἴδωλον"]
@@ -116,11 +116,10 @@ def main(apply=False):
     candidate_ws = Workspace(candidate, grid_getter=lambda: mist,
                              wd_grid_getter=lambda: wd,
                              cool_grid_getter=lambda: cool)
-    candidate_ws.state_at(None, with_trails=False)
+    candidate_ws.state_at(None)
     # Manual orbital surgery = new conservation baseline.  Uniform translation
     # and boost preserve all relative states; no old wind history is invented.
     candidate_ws.sim.reset_conservation_epoch(recenter=True)
-    candidate_ws._trail_cache = None
 
     candidate_dir = ROOT / ".data" / "candidates"
     candidate_dir.mkdir(parents=True, exist_ok=True)

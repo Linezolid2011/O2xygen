@@ -1,10 +1,11 @@
-// Three.js scene: emissive stars by Teff, server-computed smoke trails, labels.
-// ADR-0021: the client computes NO physics. Positions arrive as server poses
-// (SSE), trails as server-integrated paths; this file only draws them.
+// Three.js scene: emissive stars by Teff, received-pose smoke trails, labels.
+// ADR-0021/0034: the client computes NO physics. Trails are only a finite
+// client-side history of authoritative positions; the server integrates none.
 import * as THREE from "three";
 import { OrbitControls } from "/vendor/OrbitControls.js";
 import { AU, DAY } from "./kepler.js";
 
+const TRAIL_CAPACITY = 240;          // ~4 s at 60 Hz, fixed memory per body
 const texLoaderCache = {};
 const _followDelta = new THREE.Vector3();
 const _Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -47,8 +48,10 @@ export class OrbitScene {
     this.system = system;
     this.cb = callbacks;
     this.snap = null;             // latest server meta snapshot (poll)
-    this.pose = null;             // latest server pose (SSE)
-    this.poseHist = [];           // ring buffer of recent poses (head arc)
+    this.pose = null;             // latest server pose (SSE or poll fallback)
+    this.trailCount = 0;          // shared ring occupancy for every body
+    this.trailHead = 0;           // next ring slot
+    this.trailLastTime = null;    // pause/duplicate guard
     this.selected = null;
     this.hover = null;
     this.is2D = false;
@@ -186,22 +189,29 @@ export class OrbitScene {
   }
 
   buildTrails() {
-    /** Smoke trails: SERVER-INTEGRATED paths streamed over SSE (ADR-0021).
-     *  Each update carries the full window (~91 barycentric points per
-     *  body); per frame we splice the head arc from the pose ring buffer
-     *  so the smoke attaches to the body exactly. No client-side history,
-     *  no resampling, no propagation. ADR-0022: EVERY body gets smoke. */
+    /** ADR-0034: each line is ONLY the latest 240 received pose samples.
+     *  Ring storage and GPU buffers are allocated once.  There is no initial
+     *  backward integration, no server trail payload and no persistence. */
     this.trailByName = {};
-    this.trailData = {};               // name -> {window_days, points, t_days}
     for (const b of this.system.bodies) {
+      const positions = new Float32Array(TRAIL_CAPACITY * 3);
+      const colors = new Float32Array(TRAIL_CAPACITY * 3);
+      const posAttr = new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage);
+      const colAttr = new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage);
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(3), 3));
-      geo.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(3), 3));
+      geo.setAttribute("position", posAttr);
+      geo.setAttribute("color", colAttr);
+      geo.setDrawRange(0, 0);
       const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
         vertexColors: true, transparent: true, opacity: 0.9,
       }));
+      line.visible = false;
+      line.frustumCulled = false;      // ring positions change every pose
       this.scene.add(line);
-      this.trailByName[b.name] = { line, baseColor: this._trailColor(b) };
+      this.trailByName[b.name] = {
+        line, baseColor: this._trailColor(b), background: new THREE.Color(0x0a0c11),
+        history: new Float32Array(TRAIL_CAPACITY * 3), positions, colors,
+      };
     }
   }
 
@@ -281,13 +291,12 @@ export class OrbitScene {
   }
 
   /** Latest server meta snapshot (poll): star display props + fallback pose. */
-  setSnapshot(snap) {
+  setSnapshot(snap, allowPose = false) {
     this.snap = snap;
-    if (!this.pose) {
-      // degraded mode (no SSE yet): positions come from the poll itself
+    if (!this.pose || allowPose) {
       const p = {};
       for (const [n, b] of Object.entries(snap.bodies ?? {})) p[n] = b.p;
-      this.pose = { p, t_days: snap.t_days, bcm: this._bcmOf(p) };
+      this.setPose(p, snap.t_days, this._bcmOf(p));
     }
     this._starBase = this._starBase ?? {};      // first snapshot = scale baseline
     this.updateStars(snap);
@@ -304,18 +313,62 @@ export class OrbitScene {
     return mt > 0 ? [mx / mt, my / mt, mz / mt] : [0, 0, 0];
   }
 
-  /** Authoritative pose from the SSE stream (absolute coordinates + the
-   *  server-computed barycenter). Kept in a short ring buffer: the smoke's
-   *  head arc between the last recomputed path and NOW is drawn from these
-   *  authoritative samples - never from a straight chord and never from
-   *  client-side integration. */
+  /** Append one authoritative pose to the fixed-size client history. */
   setPose(p, tDays, bcm) {
     if (this.pose && tDays < this.pose.t_days - 1e-9) {
-      this.poseHist = [];          // clock rewound (rollback/world switch)
+      this.clearTrails();            // rollback: discard the cancelled future
     }
-    this.pose = { p, t_days: tDays, bcm: bcm ?? this._bcmOf(p) };
-    this.poseHist.push({ t: tDays, p, bcm: this.pose.bcm });
-    if (this.poseHist.length > 600) this.poseHist.shift();   // ~10 s at 60 Hz
+    const origin = bcm ?? this._bcmOf(p);
+    this.pose = { p, t_days: tDays, bcm: origin };
+    if (this.trailLastTime !== null && tDays === this.trailLastTime) return;
+
+    const slot = this.trailHead;
+    for (const [name, t] of Object.entries(this.trailByName)) {
+      const q = p[name];
+      if (!q) continue;
+      const j = slot * 3;
+      t.history[j] = q[0] - origin[0];
+      t.history[j + 1] = q[1] - origin[1];
+      t.history[j + 2] = q[2] - origin[2];
+    }
+    this.trailHead = (slot + 1) % TRAIL_CAPACITY;
+    this.trailCount = Math.min(this.trailCount + 1, TRAIL_CAPACITY);
+    this.trailLastTime = tDays;
+    this._refreshTrails();
+  }
+
+  clearTrails() {
+    this.trailCount = 0;
+    this.trailHead = 0;
+    this.trailLastTime = null;
+    for (const t of Object.values(this.trailByName)) {
+      t.line.visible = false;
+      t.line.geometry.setDrawRange(0, 0);
+    }
+  }
+
+  /** Copy ring order into preallocated GPU arrays only when a pose arrives. */
+  _refreshTrails() {
+    const n = this.trailCount;
+    if (n < 2) return;
+    const start = (this.trailHead - n + TRAIL_CAPACITY) % TRAIL_CAPACITY;
+    for (const t of Object.values(this.trailByName)) {
+      for (let i = 0; i < n; i++) {
+        const src = ((start + i) % TRAIL_CAPACITY) * 3;
+        const dst = i * 3;
+        t.positions[dst] = t.history[src];
+        t.positions[dst + 1] = t.history[src + 1];
+        t.positions[dst + 2] = t.history[src + 2];
+        const k = Math.pow(i / (n - 1), 1.6);  // oldest faint, newest full
+        t.colors[dst] = t.background.r + (t.baseColor.r - t.background.r) * k;
+        t.colors[dst + 1] = t.background.g + (t.baseColor.g - t.background.g) * k;
+        t.colors[dst + 2] = t.background.b + (t.baseColor.b - t.background.b) * k;
+      }
+      t.line.geometry.setDrawRange(0, n);
+      t.line.geometry.attributes.position.needsUpdate = true;
+      t.line.geometry.attributes.color.needsUpdate = true;
+      t.line.visible = true;
+    }
   }
 
   /** Stellar evolution made visible: swell + redden stars relative to the
@@ -338,92 +391,6 @@ export class OrbitScene {
       const glow = g?.children.find((ch) => ch.isSprite);
       if (glow) glow.material.color.copy(c);
       if (primary && b.name === primary.name) this.starLight.color.copy(c);
-    }
-  }
-
-  /** Fade-gradient line geometry from oldest->newest points. */
-  _trailGeometry(points, baseColor) {
-    const n = points.length;
-    const pos = new Float32Array(n * 3);
-    const col = new Float32Array(n * 3);
-    const bg = new THREE.Color(0x0a0c11);              // scene background
-    for (let i = 0; i < n; i++) {
-      pos[i * 3] = points[i][0]; pos[i * 3 + 1] = points[i][1]; pos[i * 3 + 2] = points[i][2];
-      const k = Math.pow(i / (n - 1), 1.6);            // newest = full colour
-      const c = bg.clone().lerp(baseColor, k);
-      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    return geo;
-  }
-
-  /** Server-streamed trail buffers (SSE 'trails' event; the poll also feeds
-   *  this as a fallback). Points arrive head-first, origin-relative. */
-  updateTrails(payload) {
-    if (!payload?.trails) return;
-    for (const [name, t] of Object.entries(this.trailByName)) {
-      const data = payload.trails[name];
-      if (!data || data.points.length < 2) {
-        t.line.visible = false;
-        delete this.trailData[name];
-        continue;
-      }
-      t.line.visible = true;
-      // store oldest-first; the fade gradient is index-static per length
-      const pts = data.points.slice().reverse();
-      const prev = this.trailData[name];
-      this.trailData[name] = { window_days: data.window_days, points: pts,
-                               t_days: payload.t_days };
-      if (!prev || prev.points.length !== pts.length) {
-        t.posArr = null;               // force buffer realloc in drawTrails
-      }
-    }
-  }
-
-  /** Per-frame smoke draw: the far path comes from the server's backward
-   *  integration; the head arc between its compute time and NOW is spliced
-   *  from authoritative streamed poses (ring buffer) - curved at any speed,
-   *  with zero client-side physics. */
-  drawTrails() {
-    for (const [name, t] of Object.entries(this.trailByName)) {
-      const data = this.trailData[name];
-      if (!data || data.points.length < 2) continue;
-      // splice: pose samples newer than the far path's head, oldest-first,
-      // each sample made barycentric with ITS OWN barycenter (ADR-0022)
-      const splice = [];
-      for (let i = this.poseHist.length - 1; i >= 0; i--) {
-        const s = this.poseHist[i];
-        if (s.t <= data.t_days) break;
-        const pn = s.p[name];
-        if (pn && s.bcm) splice.push([pn[0] - s.bcm[0], pn[1] - s.bcm[1], pn[2] - s.bcm[2]]);
-      }
-      splice.reverse();
-      const stride = Math.max(1, Math.ceil(splice.length / 64));
-      const pts = data.points.concat(
-        stride > 1 ? splice.filter((_, i) => i % stride === 0) : splice);
-      const n = pts.length;
-      if (!t.posArr || t.posArr.length !== n * 3) {
-        const geo = this._trailGeometry(pts, t.baseColor);
-        t.line.geometry.dispose();
-        t.line.geometry = geo;
-        t.posArr = geo.attributes.position.array;
-      } else {
-        for (let i = 0; i < n; i++) {
-          t.posArr[i * 3] = pts[i][0];
-          t.posArr[i * 3 + 1] = pts[i][1];
-          t.posArr[i * 3 + 2] = pts[i][2];
-        }
-      }
-      // ultimate head pin: last vertex IS the body's live position
-      const g = this.bodyGroups[name];
-      if (g) {
-        t.posArr[(n - 1) * 3] = g.position.x;
-        t.posArr[(n - 1) * 3 + 1] = g.position.y;
-        t.posArr[(n - 1) * 3 + 2] = g.position.z;
-      }
-      t.line.geometry.attributes.position.needsUpdate = true;
     }
   }
 

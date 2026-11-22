@@ -26,7 +26,7 @@ def eggleton(ratio: float) -> float:
 def main():
     app._load_grid()
     ws = app.WS
-    ws.state_at(None, with_trails=False)
+    ws.state_at(None)
     with ws.lock:
         ps = ws.sim.sim.particles
         iv, iw = ws.sim._index["Vesper"], ws.sim._index["Εἴδωλον"]
@@ -56,7 +56,6 @@ def main():
             body.vel0 = np.array(p.vxyz)
         ws.sim._cp_times = [ws.sim.t_s]
         ws.sim._cp_snaps = [ws.sim._snapshot()]
-        ws._trail_cache = None
 
     path = app.world_mod.save_world(ws.snapshot_for_save(),
                                     app._worlds_dir() / app.CURRENT_WORLD)

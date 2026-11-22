@@ -24,7 +24,7 @@ def main():
     if app._GRID["grid"] is None or app._GRID["wd_grid"] is None:
         raise RuntimeError("MIST grids failed to load")
     ws = app.WS
-    ws.state_at(None, with_trails=False)       # settle current stellar masses
+    ws.state_at(None)       # settle current stellar masses
     b = ws.system.bodies["Εἴδωλον"]
     with ws.lock:
         ps = ws.sim.sim.particles
@@ -59,7 +59,6 @@ def main():
         new_el = rv_to_elements(r, v_new, G * (mv + mw_new))
         p_after = sum(p.m * np.array(p.vxyz) for p in ps)
         ws.sim.reset_conservation_epoch(recenter=True)
-        ws._trail_cache = None
 
     path = app.world_mod.save_world(ws.snapshot_for_save(),
                                     app._worlds_dir() / app.CURRENT_WORLD)

@@ -349,6 +349,20 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.0-dev14] - 2026-11-22
+
+### 纯客户端位姿烟迹(ADR-0034,用户裁定)
+
+- 删除服务器烟迹反向积分、窗口/速率估计、缓存、SSE trails 通道与
+  `/api/state` trails 字段;显示请求不再为烟迹复制或推进 N-body。
+- 客户端用每体最近 240 个权威位姿画线,逐样本保存当时质心相对坐标;
+  环形历史与 GPU typed arrays 预分配,仅新位姿到达时更新几何。
+- 初始/刷新无烟迹,暂停不追加,取消回退/SSE 重连清空;烟迹不入存档。
+  高速短周期允许欠采样折线,不再为虚假顺滑拖慢系统,并移除 CCSN 的
+  反向积分障碍。
+- 隔离 Σκιά 0.01 AU、30 d/s 实测:API p95 39.08 ms,约 30 fps,
+  暂停/取消/刷新语义通过;102 项测试通过,正式世界未改。
+
 ## [0.3.0-dev13] - 2026-11-22
 
 ### Σκιά 扩轨与双轨道小倾角(ADR-0033,用户裁定)
@@ -619,6 +633,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
+[0.3.0-dev14]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev14
 [0.3.0-dev13]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev13
 [0.3.0-dev12]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev12
 [0.3.0-dev11]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev11

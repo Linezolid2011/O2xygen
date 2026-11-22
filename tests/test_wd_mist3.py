@@ -48,10 +48,10 @@ def test_wd_workspace_and_save_use_only_mist_inputs(grid, tmp_path):
     b.extra.update({"evolution_model": "mist3_wd", "mini_msun": 1.2,
                     "feh": 0.0, "age0_gyr": 15.0})
     ws = Workspace(w, grid_getter=None, wd_grid_getter=lambda: grid)
-    got = ws.state_at(None, with_trails=False)["stars"]["Vesper"]
+    got = ws.state_at(None)["stars"]["Vesper"]
     assert got["teff_k"] == pytest.approx(4275.518904362204)
     ws.advance_to(365.25)
-    later = ws.state_at(None, with_trails=False)["stars"]["Vesper"]
+    later = ws.state_at(None)["stars"]["Vesper"]
     assert later["luminosity_w"] < got["luminosity_w"]
     assert later["teff_k"] < got["teff_k"]
     saved = world_mod.system_to_dict(ws.snapshot_for_save())
@@ -63,7 +63,7 @@ def test_wd_workspace_and_save_use_only_mist_inputs(grid, tmp_path):
         assert key not in bd.get("extra", {})
     back = world_mod.dict_to_system(saved)
     ws2 = Workspace(back, grid_getter=None, wd_grid_getter=lambda: grid)
-    again = ws2.state_at(None, with_trails=False)["stars"]["Vesper"]
+    again = ws2.state_at(None)["stars"]["Vesper"]
     for key in ("teff_k", "radius_m", "luminosity_w"):
         assert again[key] == pytest.approx(later[key], rel=1e-12)
 
@@ -80,12 +80,12 @@ def test_age_drives_lifecycle_for_arbitrary_star(grid):
     w = build_preset()
     w.bodies["Αστραία"].extra["age0_gyr"] = 1.0
     ws = Workspace(w, grid_getter=lambda: MainGrid(), wd_grid_getter=lambda: grid)
-    young = ws.state_at(None, with_trails=False)["stars"]["Αστραία"]
+    young = ws.state_at(None)["stars"]["Αστραία"]
     assert young["teff_k"] == 7000.0
     assert young["radius_m"] == 2.0 * R_SUN
 
     w.bodies["Αστραία"].extra["age0_gyr"] = 100.0
-    old = ws.state_at(None, with_trails=False)["stars"]["Αστραία"]
+    old = ws.state_at(None)["stars"]["Αστραία"]
     expected = grid.evaluate(1.29, 0.1, 100.0e9)
     assert old["teff_k"] == pytest.approx(expected.teff_k)
     assert old["radius_m"] == pytest.approx(expected.radius_m)

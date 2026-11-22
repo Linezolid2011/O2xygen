@@ -160,14 +160,14 @@ def _snapshot_totals(snap):
 
 def test_future_query_save_reload_and_structural_spin_conserve():
     ws = Workspace(_binary(STAR), grid_getter=lambda: _EvolvingGrid())
-    start = ws.state_at(None, with_trails=False)
+    start = ws.state_at(None)
     future_days = 20.0 * YEAR / DAY
-    predicted = ws.state_at(future_days, with_trails=False)
+    predicted = ws.state_at(future_days)
     assert ws.sim.t_s == 0.0
     assert ws.sim.wind.mass_kg == 0.0       # query used a private ledger
 
     ws.advance_to(future_days)
-    live = ws.state_at(None, with_trails=False)
+    live = ws.state_at(None)
     assert live["conservation"]["wind"]["mass_kg"] > 0.0
     before = _snapshot_totals(start)
     after = _snapshot_totals(live)
@@ -208,7 +208,7 @@ def test_future_query_save_reload_and_structural_spin_conserve():
         assert saved.wind.mass_kg > 0.0
         back = world_mod.dict_to_system(world_mod.system_to_dict(saved))
         ws = Workspace(back, grid_getter=lambda: _EvolvingGrid())
-        reloaded = ws.state_at(None, with_trails=False)
+        reloaded = ws.state_at(None)
         assert reloaded["conservation"]["wind"]["mass_kg"] == pytest.approx(
             previous["conservation"]["wind"]["mass_kg"], rel=2e-15)
         for key in _snapshot_totals(reloaded):
@@ -222,9 +222,9 @@ def test_future_query_save_reload_and_structural_spin_conserve():
 def test_total_angular_momentum_includes_tides_and_structure():
     ws = Workspace(_binary(STAR, love_k2=0.02),
                    grid_getter=lambda: _EvolvingGrid())
-    before = ws.state_at(None, with_trails=False)["conservation"]["total"]
+    before = ws.state_at(None)["conservation"]["total"]
     ws.advance_to(20.0)
-    after = ws.state_at(None, with_trails=False)["conservation"]["total"]
+    after = ws.state_at(None)["conservation"]["total"]
     scale = np.linalg.norm(before["angular_momentum_kg_m2_s"])
     np.testing.assert_allclose(after["angular_momentum_kg_m2_s"],
                                before["angular_momentum_kg_m2_s"],
@@ -280,7 +280,7 @@ def test_star_editor_resets_wind_and_preserves_relative_state(tmp_path,
                                rtol=0, atol=1e-3)
     np.testing.assert_allclose(states["B"][1] - states["A"][1], v_before,
                                rtol=0, atol=1e-9)
-    snap = ws.state_at(None, with_trails=False)
+    snap = ws.state_at(None)
     np.testing.assert_allclose(snap["conservation"]["bodies"]["first_moment_kg_m"],
                                0.0, rtol=0, atol=1e28)
     np.testing.assert_allclose(snap["conservation"]["bodies"]["momentum_kg_m_s"],

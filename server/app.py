@@ -586,7 +586,6 @@ def api_star_edit(body):
         # baseline: clear old wind, set Q=P=0 by a uniform translation/boost,
         # and discard checkpoints containing the old mass and coordinates.
         WS.sim.reset_conservation_epoch(recenter=True)
-        WS._trail_cache = None
     world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
     return {"ok": True, "body": body_json(b)}
 
@@ -662,7 +661,6 @@ def api_add_body(body):
         # all relative states, clear the old ledger and restart checkpoints
         # (older ones have the wrong particle count and conservation basis).
         WS.sim.reset_conservation_epoch(recenter=True)
-        WS._trail_cache = None
     return {"ok": True, "name": name}
 
 
@@ -724,7 +722,7 @@ def api_debug_metrics():
     return {"checkpoints": len(WS.sim._cp_times),
             "sim_t_days": WS.sim.t_s / DAY,
             "checkpoint_span_days": (WS.sim._cp_times[-1] - WS.sim._cp_times[0]) / DAY if WS.sim._cp_times else 0,
-            "conservation": WS.state_at(None, with_trails=False)["conservation"],
+            "conservation": WS.state_at(None)["conservation"],
             "rss_mb": _rss_mb()}
 
 
@@ -806,7 +804,6 @@ def api_world_align(body):
         raise HttpError(400, "对齐操作需要明确确认")
     with WS.lock:
         shift, before, after = WS.sim.align_barycenter_to_origin()
-        WS._trail_cache = None
     world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
     return {"ok": True, "world": CURRENT_WORLD,
             "translation_m": [float(x) for x in shift],
@@ -897,12 +894,12 @@ def api_get_sky(query):
 # Server-driven rendering (ADR-0021): the server is the ONLY computer. The
 # client integrates nothing - it draws what this stream emits.
 #   event: pose    ~60 Hz, only while the sim clock moves (idle = silent)
-#   event: trails  ~5.5 Hz while moving, only when the cached paths changed
 #   comment ": hb" every 5 s, liveness + proxy keep-alive
+# Trails are client-side history of these poses; the server never integrates
+# backward for display and emits no trail channel (ADR-0034).
 # Meta (elements, star props) stays on the classic 800 ms /api/state poll -
 # it was never the problem.
 POSE_INTERVAL_S = 1.0 / 60.0
-TRAIL_INTERVAL_S = 0.18
 HEARTBEAT_S = 5.0
 
 
@@ -913,12 +910,10 @@ def _sse_frame(event: str, payload: dict) -> bytes:
 
 
 def _sse_loop(h: "Handler") -> None:
-    """Emit pose/trail frames until the client goes away. Runs on the
+    """Emit pose frames until the client goes away. Runs on the
     connection's own thread (ThreadingHTTPServer). Reads the global WS every
     tick, so world switches / cancel-rollbacks re-anchor automatically."""
     last_pose_t = None
-    last_trail_check = 0.0
-    last_trails_obj = None
     last_hb = time.time()
     while True:
         now = time.time()
@@ -941,16 +936,6 @@ def _sse_loop(h: "Handler") -> None:
                 if pose is not None:
                     h.wfile.write(_sse_frame("pose", pose))
                     last_pose_t = t_s
-                # trails: drive the server-side (cached) backward integration
-                # only while the clock moves; emit only when it recomputed
-                if t_s is not None and now - last_trail_check >= TRAIL_INTERVAL_S:
-                    last_trail_check = now
-                    snap = ws.state_at(None)
-                    trails = snap.get("trails")
-                    if trails is not None and trails is not last_trails_obj:
-                        h.wfile.write(_sse_frame("trails", {"t_days": snap["t_days"],
-                                                            "trails": trails}))
-                        last_trails_obj = trails
             if now - last_hb >= HEARTBEAT_S:
                 h.wfile.write(b": hb\n\n")
                 last_hb = now

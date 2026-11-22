@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from bisect import bisect_right
 import threading
-import time
 import numpy as np
 
 from o2xygen.constants import DAY, G, M_SUN
@@ -25,8 +24,6 @@ from o2xygen.system import System, Body, STAR
 
 EVOLVE_CADENCE_S = 1.0 * 365.25 * DAY   # stellar evolution update cadence
 SECONDS_PER_YEAR = 365.25 * DAY
-TRAIL_WALL_SPAN_S = 4.0                 # smoke covers ~this many WALL seconds
-                                        # of recent history at speed (ADR-0021)
 # Constant-time-lag tide defaults (ADR-0023). Per-body extra overrides:
 # love_k2, tidal_dt_s, inertia_factor (I = inertia_factor * M * R^2).
 DEFAULT_LOVE_K2 = {STAR: 0.02, "body": 0.30}
@@ -50,8 +47,6 @@ class Workspace:
         # tracks (current mass) before the first query answers. The grid may
         # still be loading at startup -> settle lazily on first contact.
         self._settled = False
-        self._trail_cache = None            # (t_s, min_window_s, result, windows)
-        self._rate_hist = []                # (wall_s, t_s) for clock-rate estimate
         self._spin_epoch_s = 0.0            # catalog spin phases valid at t=0
         try:
             self._settled = self._apply_evolution_at(0.0)
@@ -329,7 +324,6 @@ class Workspace:
                 self._settled = self._apply_evolution_at(self.sim.t_s)
             self._evolve_between(self.sim.t_s, t_s)
             self.sim.integrate_to(t_s)
-            self._trail_cache = None
 
     def _copy_at(self, t_s: float):
         """(raw rebound sim, spin map, wind ledger) at t_s.
@@ -366,9 +360,9 @@ class Workspace:
             sim.integrate(t_s, exact_finish_time=1)
         return sim, spins, wind
 
-    def state_at(self, t_days: float | None, with_trails: bool = True) -> dict:
+    def state_at(self, t_days: float | None) -> dict:
         """State snapshot at t_days (positions, velocities, masses,
-        luminosities, osculating elements, trails). NON-DESTRUCTIVE
+        luminosities, osculating elements). NON-DESTRUCTIVE
         (ADR-0018): t_days=None reads the live sim as-is; any other time is
         answered from a checkpoint-restored copy, so no query - however
         pathological - can move the shared clock (2026-11-15 desync class)."""
@@ -384,7 +378,7 @@ class Workspace:
             else:
                 t_s = float(t_days) * DAY
                 sim, spins, wind = self._copy_at(t_s)
-            return self._snapshot_dict(sim, t_s, with_trails, spins, wind)
+            return self._snapshot_dict(sim, t_s, spins, wind)
 
     def _conservation_dict(self, names: list[str], ms: np.ndarray,
                            pos: np.ndarray, vel: np.ndarray, spins: dict,
@@ -431,7 +425,7 @@ class Workspace:
             },
         }
 
-    def _snapshot_dict(self, sim, t_s: float, with_trails: bool,
+    def _snapshot_dict(self, sim, t_s: float,
                        spins: dict | None = None, wind=None) -> dict:
         """Serialise a sim object (live NBodySimulation or raw rebound copy)
         sitting at t_s into the /api/state payload."""
@@ -439,11 +433,9 @@ class Workspace:
         ps = sim.sim.particles if live else sim.particles
         idx = self.sim._index
         bodies = {}
-        states = {}
         for name, i in idx.items():
             r = np.array(ps[i].xyz)
             v = np.array(ps[i].vxyz)
-            states[name] = (r, v)
             bodies[name] = {"p": [float(x) for x in r],
                             "v": [float(x) for x in v],
                             "m": float(ps[i].m)}
@@ -455,7 +447,6 @@ class Workspace:
         # at display precision; for near-equal binaries it is the only
         # non-arbitrary choice. No privileged root body exists.
         elements = {}
-        periods = {}                               # body -> period_days | None
         names_order = list(idx.keys())
         ms = np.array([ps[idx[n]].m for n in names_order])
         pos_arr = np.array([ps[idx[n]].xyz for n in names_order])
@@ -490,7 +481,6 @@ class Workspace:
                 "argp": float(el.argp), "nu": float(el.nu),
                 "period_days": float(T / DAY),
             }
-            periods[name] = float(T / DAY)
         # display star props: fresh MIST values at t_s where the grid has
         # them (covers copies, whose catalog bodies are NOT updated), else
         # the catalog values the live cadence maintains
@@ -524,116 +514,9 @@ class Workspace:
             "stars": stars,
             "spins": spin_json,
             "conservation": conservation,
-            "trails": self._trails(sim, states, periods, t_s) if with_trails else {},
             "luminosity_w": {s.name: stars[s.name]["luminosity_w"]
                              for s in self.system.stars()},
         }
-
-    # -------------------------------------------------------------- trails
-    def _clock_rate(self, t_s: float) -> float:
-        """Recent sim-clock rate [sim s / wall s], from samples taken at
-        trail-query time (the SSE emitter and the poll both drive this).
-        0 when the clock is frozen - windows then stay purely physical."""
-        now = time.time()
-        hist = self._rate_hist
-        hist.append((now, t_s))
-        while len(hist) > 2 and now - hist[0][0] > 2.0:
-            hist.pop(0)
-        if len(hist) < 2 or hist[-1][0] - hist[0][0] < 0.2:
-            return 0.0
-        return abs(t_s - hist[0][1]) / (hist[-1][0] - hist[0][0])
-
-    def _trails(self, sim, states, periods: dict, t_s: float) -> dict:
-        """Actual integrated paths over a trailing window (the "smoke").
-
-        Per body the window is max(physics, rate x TRAIL_WALL_SPAN_S): a
-        fraction of the osculating period clamped to [20 d, 400 d] at low
-        speed, and "the last few WALL seconds" at speed - so the recompute
-        gap (interval x speed) is always a small fraction of the window and
-        no long straight head-chord can appear (2026-11-17 report). Bodies
-        without a bound osculating orbit vs the rest of the system
-        (tight-binary members) still get smoke: their physical window falls
-        back to the 400 d cap. Sampled by ONE backward pass on a copy - the
-        live integrator is never disturbed. Results are cached and recomputed
-        once the clock advances by one sample stride (window/90), not a fixed
-        wall interval: slow playback gets smooth sub-second updates, not
-        multi-second freezes.
-        """
-        names = list(self.sim._index)      # ADR-0022: EVERY body gets smoke
-        if not names:
-            return {}
-        rate = self._clock_rate(t_s)           # sim seconds per wall second
-        # windows in SECONDS (t_s is seconds - do not mix units!). A missing
-        # or non-finite period (hyperbolic vs origin) uses the 400 d cap.
-        def _phys(n):
-            p = periods.get(n)
-            if p is None or not np.isfinite(p) or p <= 0:
-                return 400.0 * DAY
-            return float(np.clip(0.4 * p, 20.0, 400.0)) * DAY
-        windows = {n: max(_phys(n), rate * TRAIL_WALL_SPAN_S) for n in names}
-        K = 90                                     # samples per body window
-        step = min(windows.values()) / K           # shared sample grid
-        # work safety valve: never more than ~2000 integrate calls per pass
-        # (only bites on pathological window spreads)
-        step = max(step, max(windows.values()) / 2000.0)
-        t_end = t_s - max(windows.values())
-
-        cache = self._trail_cache
-        if cache is not None and set(cache[2]) == set(names) \
-                and abs(t_s - cache[0]) < cache[1] / K \
-                and all(abs(windows[n] - cache[3][n]) <= 0.1 * cache[3][n]
-                        for n in names):
-            return cache[2]
-
-        if sim is self.sim:
-            sim = self.sim._restore(self.sim._snapshot(), t_s)
-        sim.dt = -abs(self.sim.dt_s)
-        idx = self.sim._index
-
-        # trails are BARYCENTRIC (ADR-0022): subtract the system barycenter
-        # at every sample. Every body gets smoke - a primary star visibly
-        # weaving about the common center of mass is the point.
-        ps = sim.particles
-        m0 = np.array([p.m for p in ps])           # masses at t_s (head)
-        m0_tot = float(m0.sum())
-
-        def rel(i):
-            arr = np.array([q.xyz for q in ps])
-            mm = np.array([q.m for q in ps])
-            bcm = (mm[:, None] * arr).sum(axis=0) / mm.sum()
-            return [float(x) for x in (np.array(ps[i].xyz) - bcm)]
-
-        per_body_n = {n: int(round(windows[n] / step)) + 1 for n in names}
-        pts = {n: [None] for n in names}          # head filled below
-        counts = {n: 1 for n in names}
-
-        t = t_s
-        while t > t_end and any(counts[n] < per_body_n[n] for n in names):
-            t = t - step
-            sim.integrate(t, exact_finish_time=1)
-            ps = sim.particles
-            for n in names:
-                if counts[n] < per_body_n[n]:
-                    # sample only while inside this body's window
-                    if t >= t_s - windows[n] - step * 0.5:
-                        pts[n].append(rel(idx[n]))
-                        counts[n] += 1
-        # heads at the REQUESTED time t_s (the loop ended at t_end; `states`
-        # holds the absolute t_s states) - barycenter from the same masses
-        pos0 = np.array([states[n][0] for n in idx])
-        o_head = (m0[:, None] * pos0).sum(axis=0) / m0_tot
-        for n in names:
-            pts[n][0] = [float(x) for x in (np.asarray(states[n][0]) - o_head)]
-        # decimate to <= ~90 points per body (the shared grid over-samples
-        # long-window bodies when one short-period body sets the step)
-        out = {}
-        for n in names:
-            p = pts[n]
-            stride = max(1, len(p) // 90)
-            out[n] = {"window_days": windows[n] / DAY,
-                      "points": p[::stride] if len(p) > 90 else p}
-        self._trail_cache = (t_s, min(windows.values()), out, windows)
-        return out
 
     # -------------------------------------------------------------- saving
     def snapshot_for_save(self) -> System:
@@ -720,7 +603,7 @@ class Workspace:
         """Per-star irradiation at body_name. t_days=None -> current time.
         A star's own flux is excluded (self-irradiation is meaningless and
         divides by zero)."""
-        snap = self.state_at(t_days, with_trails=False)
+        snap = self.state_at(t_days)
         p = snap["bodies"][body_name]["p"]
         out = {}
         for s in self.system.stars():
