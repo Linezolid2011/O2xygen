@@ -349,6 +349,18 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.0-dev13] - 2026-11-22
+
+### Σκιά 扩轨与双轨道小倾角(ADR-0033,用户裁定)
+
+- Σκιά 移至 0.05 AU,轨道倾角 2°;周期与初始自转周期同步更新为
+  89.3467 h。实际存档重载基础步长提升约 11.18 倍,完整七体 100 年
+  真实风＋潮汐验证仅 3.82 s,最大 e=1.87e-4。
+- Múspellsheimr 保持 300 AU,增加相对外层三星轨道面的 2° 顺行倾角;
+  100 kyr 对照无 e>1 事件,最终 a=300.94 AU、e=0.00756。
+- 保留候选、验证、时间戳备份和正式应用的分离流程;新增可复现脚本
+  `scripts/incline_skia_muspell.py`。
+
 ## [0.3.0-dev12] - 2026-11-22
 
 ### Múspellsheimr 轨道修复与 Σκιά(ADR-0032,用户裁定)
@@ -607,6 +619,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
+[0.3.0-dev13]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev13
 [0.3.0-dev12]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev12
 [0.3.0-dev11]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev11
 [0.3.0-dev10]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev10
