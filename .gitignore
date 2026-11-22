@@ -19,6 +19,8 @@ venv/
 
 # ---- 世界存档:用户内容,不进仓库 ----
 .data/worlds/
+.data/candidates/
+.data/backups/
 
 # ---- Hipparcos 原始/转换星表:仅供本地验证与后续导入 ----
 .data/hip2000/
