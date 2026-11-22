@@ -113,7 +113,9 @@ body {
 #catalog li .bkind { font-size: 10px; color: var(--text-faint); }
 #catalog li .child-mark { color: var(--text-faint); font-size: 10px; }
 .add-body { border-style: dashed; width: 100%; }
-.sidebar-foot { font-size: 11px; color: var(--text-faint); padding: 4px; }
+.sidebar-foot { font-size: 11px; color: var(--text-faint); padding: 4px;
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.sidebar-foot .add-body { width: 100%; }
 
 /* viewport */
 #viewport-wrap { flex: 1; position: relative; min-width: 0; background: #0a0c11; }

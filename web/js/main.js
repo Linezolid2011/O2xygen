@@ -4,6 +4,7 @@ import { OrbitScene, teffColor } from "./scene3d.js";
 import { buildCatalog } from "./catalog.js";
 import { initPanels, showBody, onTimeChanged, setPanelMode } from "./panels.js";
 import { initTimeline } from "./timeline.js";
+import { initBodyBuilder } from "./add_body.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -218,6 +219,9 @@ async function boot() {
     const align = $("#btn-align");
     align.disabled = on || appMode !== "edit";
     align.classList.toggle("accent", appMode === "edit");
+    const add = $("#btn-add-body");
+    add.disabled = on || appMode !== "edit";
+    add.classList.toggle("accent", appMode === "edit");
   }
 
   evBtn.addEventListener("click", async () => {
@@ -385,6 +389,7 @@ async function boot() {
       afModal.hidden = true;
       evModal.hidden = true;
       $("#align-modal").hidden = true;
+      bodyBuilder.close();
       closeStarEditor();
       setPanelMode(next);
       setEvolveButton("idle");       // edit mode: disabled by appMode
@@ -638,37 +643,15 @@ async function boot() {
     }
   });
 
-  // ---------------- add-body modal ----------------
-  // TEMP-DISABLED(2026-11-15): 添加天体挡路,后续加回。连同 index.html 的按钮与本块一起取消注释。
-  // const addModal = $("#add-modal");
-  // const parentSel = $("#add-parent");
-  // function refreshParents() {
-  //   parentSel.innerHTML = system.bodies
-  //     .map((b) => `<option value="${b.name}">${b.name}</option>`).join("");
-  // }
-  // $("#btn-add-body").addEventListener("click", () => { refreshParents(); addModal.hidden = false; });
-  // $("#add-close").addEventListener("click", () => { addModal.hidden = true; });
-  // $("#add-cancel").addEventListener("click", () => { addModal.hidden = true; });
-  // $("#add-confirm").addEventListener("click", async () => {
-  //   const name = $("#add-name").value.trim();
-  //   if (!name) { $("#add-error").textContent = "请输入名称"; return; }
-  //   if (system.bodies.some((b) => b.name === name)) { $("#add-error").textContent = "名称已存在"; return; }
-  //   const a = parseFloat($("#add-a").value), e = parseFloat($("#add-e").value),
-  //         inc = parseFloat($("#add-inc").value), mass = parseFloat($("#add-mass").value);
-  //   if (![a, e, inc, mass].every(isFinite)) {
-  //     $("#add-error").textContent = "请输入有效的轨道根数与质量数值";
-  //     return;
-  //   }
-  //   const r = await fetch("/api/add_body", {
-  //     method: "POST", headers: { "Content-Type": "application/json" },
-  //     body: JSON.stringify({
-  //       name, around: parentSel.value,
-  //       a_au: a, e, inc_deg: inc, mass_earth: mass,
-  //     }),
-  //   });
-  //   if (!r.ok) { $("#add-error").textContent = await errDetail(r); return; }
-  //   location.reload();
-  // });
+  // ---------------- full-screen body builder (edit mode only) ----------------
+  const bodyBuilder = initBodyBuilder({
+    system,
+    onCommitted: () => location.reload(),
+  });
+  window.__bodyBuilder = bodyBuilder;   // debug/test hook; preview is read-only
+  $("#btn-add-body").addEventListener("click", () => {
+    if (appMode === "edit" && !evolving) bodyBuilder.open();
+  });
 
   // initial selection: the moon he had selected in the screenshots
   await select(system.bodies.some((b) => b.name === "Αύρα") ? "Αύρα" : system.bodies[0].name);

@@ -7,6 +7,7 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/vendor/uPlot.min.css">
 <link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/css/body-builder.css">
 <script type="importmap">
 { "imports": { "three": "/vendor/three.module.js" } }
 </script>
@@ -54,9 +55,11 @@
         <input type="text" id="catalog-filter" placeholder="搜索天体…  ">
       </div>
       <ul id="catalog"></ul>
-      <!-- TEMP-DISABLED(2026-11-15): 添加天体挡路,后续加回。恢复:取消下面两行的注释 + main.js 对应 wiring -->
-      <!-- <button class="btn ghost add-body" id="btn-add-body">＋ 添加天体</button> -->
-      <div class="sidebar-foot">● 本地工作空间</div>
+      <div class="sidebar-foot">
+        <button class="btn add-body" id="btn-add-body" disabled
+                title="编辑模式：直接放置或通过轨道添加天体">＋ 添加天体</button>
+        <span>● 本地工作空间</span>
+      </div>
     </aside>
 
     <section id="viewport-wrap">
@@ -271,34 +274,8 @@
   </div>
 </div>
 
-<!-- ======================= add body modal ======================= -->
-<div class="modal-mask" id="add-modal" hidden>
-  <div class="modal">
-    <div class="modal-head">
-      <div>
-        <div class="modal-eyebrow">O2XYGEN WORKSPACE</div>
-        <h3>添加天体</h3>
-      </div>
-      <button class="icon-btn" id="add-close">✕</button>
-    </div>
-    <div class="form-grid">
-      <label>名称<input id="add-name" placeholder="例如:Elpis"></label>
-      <label>参考天体<select id="add-parent"></select></label>
-      <label>半长轴 (AU)<input id="add-a" type="number" step="0.01" value="1.0"></label>
-      <label>偏心率<input id="add-e" type="number" step="0.01" min="0" max="0.9" value="0.05"></label>
-      <label>倾角 (°)<input id="add-inc" type="number" step="0.1" value="0"></label>
-      <label>质量 (M⊕)<input id="add-mass" type="number" step="0.1" value="1.0"></label>
-    </div>
-    <p class="modal-note">轨道根数只是放置工具:实际存入世界的是相对参考天体
-    当前位置的笛卡尔状态向量(ADR-0016)。非 0 时刻添加的天体以添加时刻
-    状态作为存档初始条件。</p>
-    <div class="modal-foot">
-      <span id="add-error" class="err"></span>
-      <button class="btn ghost" id="add-cancel">取消</button>
-      <button class="btn accent" id="add-confirm">创建</button>
-    </div>
-  </div>
-</div>
+<!-- full-screen builder, below the unchanged top bar -->
+<section id="body-builder" hidden></section>
 
 <script src="/vendor/uPlot.min.js"></script>
 <script type="module" src="/js/main.js"></script>

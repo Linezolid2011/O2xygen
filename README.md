@@ -57,6 +57,8 @@ MIST 运行时求值,不另存副本(ADR-0022/0026)。schema v2 另存权威逃�
   可在保存前预览生命周期与损失量,年龄轨道按 MIST EEP 分段并支持拖动;
   保存才入档,退出不保存;编辑模式可用“对齐”把剩余天体质心纯平移到
   世界原点并保存,速度、质量、年龄、自转及风账本均不重置(ADR-0031)。
+  双栏“添加天体”支持 MIST 恒星/非恒星、绝对位置速度与速度箭头、单母星
+  完整开普勒轨道预览;确认只保存绝对 p/v,不保留层级(ADR-0036)。
 - **温度管线**:三种平衡温度体制 + 反照率,温度表从当前时刻向前采样。
 - **WebUI**:标准库 http.server + SSE 推流 + Three.js + uPlot,无构建步骤;
   服务器权威位姿、客户端零物理的固定容量烟迹环形缓冲区、**Hipparcos
@@ -75,7 +77,7 @@ python -m venv .venv
 `http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
 测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
-测试(103 项,含公开参照标定、风损封闭守恒、固定原点与 desync 回归):
+测试(108 项,含公开参照标定、风损封闭守恒、固定原点与放置回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -105,7 +107,7 @@ J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
 src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
 server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         103 项标定、守恒与积分验收测试
+tests/         108 项标定、守恒与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)

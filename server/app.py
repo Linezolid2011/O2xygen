@@ -617,51 +617,198 @@ def api_pipeline(body):
 
 
 # ------------------------------------------------------------- add body -----
-def api_add_body(body):
-    if _evolution_active():
-        # adding a particle mid-flight would desync the job's checkpoints
-        # and invalidate its world file (fixed body count per archive)
-        raise HttpError(409, "推演进行中,不能添加天体")
-    name = _body_str(body, "name", required=True).strip()
-    if not name:
-        raise HttpError(400, "请输入名称")
+M_JUPITER = 1.89813e27
+
+
+def _finite(values, message="参数必须为有限数值"):
+    if not np.all(np.isfinite(np.asarray(values, dtype=float))):
+        raise HttpError(400, message)
+
+
+def _body_draft(data: dict):
+    """Validate a candidate's intrinsic inputs without changing the world."""
+    name = _body_str(data, "name", required=True).strip()
+    kind = _body_str(data, "kind", BODY)
+    if not name or kind not in (STAR, BODY):
+        raise HttpError(400, "名称不能为空,类型须为恒星或非恒星")
     if name in SYSTEM.bodies:
         raise HttpError(400, "名称已存在")
-    # no privileged root body anymore (ADR-0022): default placement
-    # reference is the most massive body in the world
-    ref_name = _body_str(body, "around") \
-        or max(SYSTEM.bodies.values(), key=lambda b: b.mass_kg).name
-    if ref_name not in SYSTEM.bodies:
-        raise HttpError(400, f"参考天体 '{ref_name}' 不存在")
-    mass_earth = _body_float(body, "mass_earth", 1.0)
-    a_au = _body_float(body, "a_au", 1.0)
-    e = _body_float(body, "e", 0.0)
-    inc_deg = _body_float(body, "inc_deg", 0.0)
-    mass = mass_earth * M_EARTH
-    with WS.lock:
-        # place relative to the reference body's CURRENT state (mid-flight
-        # placement): the catalog pos0/vel0 become "state at placement time",
-        # which is what the save file stores for this body.
+    star_out = nonstar_out = None
+    if kind == STAR:
+        mini = _body_float(data, "mini_msun", 1.0)
+        feh = _body_float(data, "feh", 0.0)
+        age0 = _body_float(data, "age0_gyr", 1.0)
+        period_h = _body_float(data, "spin_period_h", 24.0)
+        _finite([mini, feh, age0, period_h])
+        if mini <= 0.0 or age0 < 0.0 or period_h < 0.0:
+            raise HttpError(400, "初始质量须为正,年龄/自转周期不得为负")
+        axis = np.asarray(data.get("spin_axis", [0.0, 0.0, 1.0]), dtype=float)
+        if axis.shape != (3,) or not np.all(np.isfinite(axis)) \
+                or np.linalg.norm(axis) < 1e-15:
+            raise HttpError(400, "自转轴必须为三个有限且非零的数值")
+        axis /= np.linalg.norm(axis)
+        extra = {"mini_msun": mini, "feh": feh, "age0_gyr": age0}
+        use_cool = data.get("use_wdcool", False)
+        if not isinstance(use_cool, bool):
+            raise HttpError(400, "use_wdcool must be boolean")
+        if use_cool:
+            wm = _body_float(data, "wd_mass_msun", mini)
+            wf = _body_float(data, "wd_formation_age_gyr", max(0.0, age0 - 0.1))
+            env = _body_str(data, "wd_envelope", "thick")
+            _finite([wm, wf])
+            if wm <= 0.0 or wf < 0.0 or env not in ("thick", "thin"):
+                raise HttpError(400, "WDCool 输入无效")
+            extra.update({"wd_mass_msun": wm, "wd_formation_age_gyr": wf,
+                          "wd_envelope": env})
+        if _grid_getter() is None:
+            raise HttpError(503, "MIST 网格尚未就绪")
+        try:
+            p = _evaluate_stellar(mini, feh,
+                                  age0 * 1e9 + WS.sim.t_s / (365.25 * DAY),
+                                  body=SimpleNamespace(extra=extra))
+        except ValueError as e:
+            raise HttpError(400, str(e))
+        mass, radius, lum = p.mass_msun * M_SUN, p.radius_m, p.luminosity_w
+        extra.update({"teff_k": p.teff_k, "luminosity_w": lum})
+        rate = 2.0 * np.pi / (period_h * 3600.0) if period_h > 0.0 else 0.0
+        candidate = Body(name, STAR, mass_kg=mass, radius_m=radius,
+                         luminosity_w=lum, spin_axis=axis,
+                         spin_rate_rad_s=rate, extra=extra)
+        from o2xygen.lifecycle import resolve_stellar
+        meta = resolve_stellar(mini, feh, age0 * 1e9 + WS.sim.t_s / (365.25 * DAY),
+                               _grid_getter(), _GRID["wd_grid"],
+                               _GRID["cool_grid"], extra)
+        star_out = {"mass_msun": p.mass_msun, "radius_rsun": radius / R_SUN,
+                    "luminosity_lsun": lum / L_SUN, "teff_k": p.teff_k,
+                    "mdot_msun_yr": p.mdot_msun_per_yr,
+                    "cumulative_loss_msun": mini - p.mass_msun,
+                    "model": meta["model"]}
+    else:
+        mv = _body_float(data, "mass_value", 1.0)
+        rv = _body_float(data, "radius_value", 1.0)
+        albedo = _body_float(data, "albedo", 0.2)
+        mu = _body_str(data, "mass_unit", "earth")
+        ru = _body_str(data, "radius_unit", "earth")
+        _finite([mv, rv, albedo])
+        if mv <= 0.0 or rv <= 0.0 or not (0.0 <= albedo <= 1.0):
+            raise HttpError(400, "质量/半径须为正,反照率须在 0–1")
+        if mu not in ("earth", "jupiter") or ru not in ("earth", "km"):
+            raise HttpError(400, "未知质量或半径单位")
+        mass = mv * (M_EARTH if mu == "earth" else M_JUPITER)
+        radius = rv * R_EARTH_MEAN if ru == "earth" else rv * 1000.0
+        rho = 3.0 * mass / (4.0 * np.pi * radius**3)
+        candidate = Body(name, BODY, mass_kg=mass, radius_m=radius,
+                         albedo=albedo, rotation_period_s=24 * 3600.0)
+        nonstar_out = {"mean_density_kg_m3": rho, "mean_density_g_cm3": rho / 1000.0,
+                       "surface_gravity_m_s2": G * mass / radius**2,
+                       "escape_velocity_m_s": np.sqrt(2.0 * G * mass / radius)}
+    return candidate, star_out, nonstar_out
+
+
+def _draft_placement(data: dict, mass_kg: float):
+    """Pure direct/two-body placement; no hierarchy is created or persisted."""
+    placement = _body_str(data, "placement", "direct")
+    parent = parent_p = None
+    period = peri = apo = None
+    orbit_points, major_axis = [], []
+    if placement == "direct":
+        xyz = [_body_float(data, k, 0.0) for k in ("x_au", "y_au", "z_au")]
+        speed = _body_float(data, "speed_km_s", 0.0)
+        az = _body_float(data, "speed_azimuth_deg", 0.0)
+        el = _body_float(data, "speed_elevation_deg", 0.0)
+        _finite(xyz + [speed, az, el])
+        if speed < 0.0 or not (0.0 <= az <= 360.0) \
+                or not (-90.0 <= el <= 90.0):
+            raise HttpError(400, "速度不得为负,方位角 0–360°,高度角 −90–90°")
+        pos = np.asarray(xyz) * AU
+        az, el = np.radians([az, el])
+        unit = np.array([np.cos(el) * np.cos(az),
+                         np.cos(el) * np.sin(az), np.sin(el)])
+        vel = speed * 1000.0 * unit
+    elif placement == "orbit":
+        parent = _body_str(data, "parent", required=True)
+        if parent not in SYSTEM.bodies:
+            raise HttpError(400, "母星不存在")
+        a = _body_float(data, "a_au", 1.0) * AU
+        e = _body_float(data, "e", 0.0)
+        inc = _body_float(data, "inc_deg", 0.0)
+        raan = _body_float(data, "raan_deg", 0.0)
+        argp = _body_float(data, "argp_deg", 0.0)
+        phase = _body_float(data, "phase_pct", 0.0)
+        _finite([a, e, inc, raan, argp, phase])
+        if a <= 0.0 or not (0.0 <= e < 1.0) or not (0.0 <= inc <= 180.0) \
+                or not (0.0 <= raan <= 360.0) or not (0.0 <= argp <= 360.0) \
+                or not (0.0 <= phase <= 100.0):
+            raise HttpError(400, "轨道须为束缚椭圆,角度 0–360°,相位 0–100%")
         states = WS.sim.live_state()
-        r_o, v_o = states[ref_name]
-        mu = G * (WS.sim.sim.particles[WS.sim._index[ref_name]].m + mass)
-        r_rel, v_rel = elements_to_state(
-            Elements(a_m=a_au * AU, e=e, inc=np.radians(inc_deg)), mu, 0.0)
-        pos = r_o + r_rel
-        vel = v_o + v_rel
-        SYSTEM.add(Body(name, BODY, mass_kg=mass, pos0=pos.copy(), vel0=vel.copy(),
-                        radius_m=R_EARTH_MEAN, albedo=0.1,
-                        rotation_period_s=24 * 3600.0,
-                        extra={"placed_at_s": WS.sim.t_s}))
-        WS.sim.sim.add(m=mass, x=pos[0], y=pos[1], z=pos[2],
-                       vx=vel[0], vy=vel[1], vz=vel[2])
-        WS.sim._order.append(name)
-        WS.sim._index[name] = len(WS.sim._order) - 1
-        # Adding a body is also a manual new epoch, not negative wind.  Keep
-        # all relative states, clear the old ledger and restart checkpoints
-        # (older ones have the wrong particle count and conservation basis).
-        WS.sim.reset_conservation_epoch(recenter=True)
-    return {"ok": True, "name": name}
+        rp, vp = states[parent]
+        mp = WS.sim.sim.particles[WS.sim._index[parent]].m
+        mu = G * (mp + mass_kg)       # ONLY parent + candidate, by user spec
+        base = Elements(a_m=a, e=e, inc=np.radians(inc),
+                        raan=np.radians(raan), argp=np.radians(argp))
+        current = Elements(a_m=a, e=e, inc=np.radians(inc),
+                           raan=np.radians(raan), argp=np.radians(argp),
+                           m0=2.0 * np.pi * phase / 100.0)
+        rrel, vrel = elements_to_state(current, mu, 0.0)
+        pos, vel, parent_p = rp + rrel, vp + vrel, rp.copy()
+        n = np.sqrt(mu / a**3)
+        period, peri, apo = 2.0 * np.pi / n / DAY, a * (1.0 - e), a * (1.0 + e)
+        for E in np.linspace(0.0, 2.0 * np.pi, 129):
+            r, _ = elements_to_state(base, mu, (E - e * np.sin(E)) / n)
+            orbit_points.append([float(x) for x in rp + r])
+        major_axis = [orbit_points[0], orbit_points[64]]
+    else:
+        raise HttpError(400, "未知放置方式")
+    return {"p": [float(x) for x in pos], "v": [float(x) for x in vel],
+            "parent": parent,
+            "parent_p": None if parent_p is None else [float(x) for x in parent_p],
+            "period_days": period, "periapsis_m": peri, "apoapsis_m": apo,
+            "orbit_points": orbit_points, "major_axis": major_axis}
+
+
+def _draft_response(data: dict):
+    candidate, star, nonstar = _body_draft(data)
+    with WS.lock:
+        placement = _draft_placement(data, candidate.mass_kg)
+    return {"kind": candidate.kind, "name": candidate.name,
+            "mass_kg": candidate.mass_kg, "radius_m": candidate.radius_m,
+            "albedo": candidate.albedo, "star": star, "nonstar": nonstar,
+            **placement}
+
+
+def api_add_body_preview(body):
+    """Non-destructive draft evaluation: no System, simulation or save writes."""
+    return _draft_response(body)
+
+
+def api_add_body(body):
+    if _evolution_active():
+        raise HttpError(409, "推演进行中,不能添加天体")
+    if body.get("confirm") is not True:
+        raise HttpError(400, "添加天体需要明确确认")
+    with WS.lock:
+        candidate, _, _ = _body_draft(body)
+        placement = _draft_placement(body, candidate.mass_kg)
+        candidate.pos0 = np.asarray(placement["p"], dtype=float)
+        candidate.vel0 = np.asarray(placement["v"], dtype=float)
+        candidate.extra["placed_at_s"] = WS.sim.t_s
+        SYSTEM.add(candidate)
+        WS.sim.sim.add(m=candidate.mass_kg, x=candidate.pos0[0],
+                       y=candidate.pos0[1], z=candidate.pos0[2],
+                       vx=candidate.vel0[0], vy=candidate.vel0[1],
+                       vz=candidate.vel0[2])
+        WS.sim._order.append(candidate.name)
+        WS.sim._index[candidate.name] = len(WS.sim._order) - 1
+        # Keep the user's ABSOLUTE draft p/v and every existing body unchanged.
+        # Membership edits start a fresh wind history, but are not an alignment
+        # or Galilean boost.  Rebuild checkpoints and then reload for a new dt.
+        WS.sim.wind.clear(float(WS.sim.t_s))
+        WS.sim._cp_times = [float(WS.sim.t_s)]
+        WS.sim._cp_snaps = [WS.sim._snapshot()]
+    world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
+    _rebuild(_load_system(CURRENT_WORLD), CURRENT_WORLD)
+    return {"ok": True, "name": candidate.name,
+            "body": body_json(SYSTEM.bodies[candidate.name])}
 
 
 # ------------------------------------------------------------- evolution ----
@@ -973,6 +1120,8 @@ def route_api(method: str, segs: list[str], query: dict, body: dict):
         return api_star_edit(body), 200
     if method == "POST" and tail == ["pipeline"]:
         return api_pipeline(body), 200
+    if method == "POST" and tail == ["add_body", "preview"]:
+        return api_add_body_preview(body), 200
     if method == "POST" and tail == ["add_body"]:
         return api_add_body(body), 200
     if tail[:1] == ["evolve"]:
