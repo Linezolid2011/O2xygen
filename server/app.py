@@ -1287,11 +1287,32 @@ class Server(ThreadingHTTPServer):
         log.debug("connection from %s dropped", client_address)
 
 
+def serve_with_interrupt_prompt(server):
+    """Ctrl+C -> explicit [Y/n]; Y/blank exits, N resumes serving.
+
+    Python owns the prompt rather than relying on cmd.exe's implementation-
+    specific "Terminate batch job?" behavior.  A second Ctrl+C or EOF while
+    reading the answer exits too, so the terminal can never become trapped.
+    """
+    while True:
+        try:
+            server.serve_forever()
+            return
+        except KeyboardInterrupt:
+            try:
+                answer = input("\n是否终止运行？ [Y/n] ")
+            except (KeyboardInterrupt, EOFError):
+                return
+            if answer.strip().lower() in ("", "y", "yes"):
+                return
+            print("继续运行。按 Ctrl+C 可再次停止。", flush=True)
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.WARNING)
     server = Server(("127.0.0.1", 8501), Handler)
     print(f"O2xygen {VERSION} serving on http://127.0.0.1:8501", flush=True)
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
+        serve_with_interrupt_prompt(server)
+    finally:
+        server.server_close()

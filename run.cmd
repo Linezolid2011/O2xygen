@@ -4,4 +4,5 @@ rem Data lives in the repo: .data\MIST (grids) and .data\worlds (saves,
 rem overridable via O2YGEN_WORLDS_DIR).
 cd /d %~dp0
 set PYTHONIOENCODING=utf-8
+rem Ctrl+C is handled by server/app.py with a [Y/n] confirmation prompt.
 ".\.venv\Scripts\python.exe" server\app.py

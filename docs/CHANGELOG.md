@@ -349,6 +349,14 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.0-dev17] - 2026-11-22
+
+### Ctrl+C 关闭确认
+
+- `run.cmd` 启动的服务器捕获 Ctrl+C 并显示“是否终止运行？ [Y/n]”;
+  输入 Y/yes 或直接回车退出,n 继续运行。第二次 Ctrl+C 或 EOF 也能安全退出,
+  避免终端卡在输入状态;退出时显式关闭监听 socket。
+
 ## [0.3.0-dev16] - 2026-11-22
 
 ### 双栏添加天体构建器(ADR-0036,用户裁定)
@@ -659,6 +667,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
 [0.3.1]: https://github.com/Linezolid2011/O2xygen/tree/0.3.1
+[0.3.0-dev17]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev17
 [0.3.0-dev16]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev16
 [0.3.0-dev15]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev15
 [0.3.0-dev14]: https://github.com/Linezolid2011/O2xygen/tree/0.3.0-dev14
