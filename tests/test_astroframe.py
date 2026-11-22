@@ -68,3 +68,31 @@ def test_autosave_rebases_absolute_epoch():
     assert snap.astro_frame["epoch_jd_tt"] == pytest.approx(
         J2000_JD_TT + 365.25)
     assert julian_year(snap.astro_frame) == pytest.approx(2001.0)
+
+
+def test_sky_observer_uses_absolute_world_origin_not_barycenter(monkeypatch):
+    """ADR-0035: even a one-body world has a meaningful absolute offset."""
+    import app
+    from workspace import Workspace
+    from o2xygen.system import Body, BODY
+
+    w = System("绝对原点", origin=None)
+    w.add(Body("A", BODY, mass_kg=1.0,
+               pos0=np.array([PC_M, 0.0, 0.0])))
+    w.astro_frame["position_j2000_pc"] = [2.0, 0.0, 0.0]
+    ws = Workspace(w, grid_getter=None)
+
+    class FakeSky:
+        def observe(self, observer, year, mlim):
+            np.testing.assert_allclose(observer, [3.0, 0.0, 0.0],
+                                       rtol=0, atol=1e-14)
+            return {"hip": np.array([0]), "dir_icrs": np.array([[1.0, 0.0, 0.0]]),
+                    "mag": np.array([1.0]), "dist_pc": np.array([1.0]),
+                    "bv": np.array([np.nan]), "sun_index": None}
+
+    monkeypatch.setattr(app, "SYSTEM", w)
+    monkeypatch.setattr(app, "WS", ws)
+    monkeypatch.setattr(app, "_sky_catalog", lambda: FakeSky())
+    got = app.api_get_sky({"body": ["A"]})
+    np.testing.assert_allclose(got["observer_helio_pc"], [3.0, 0.0, 0.0],
+                               rtol=0, atol=1e-14)

@@ -15,8 +15,8 @@ MIST 自变量(初始质量/[Fe/H]/年龄),当前质量/半径/光度/温度均�
 MIST 运行时求值,不另存副本(ADR-0022/0026)。schema v2 另存权威逃逸风
 历史账本,它依赖真实动力学事件,不是可重复计算的 MIST 输出(ADR-0030)。
 没有层级,没有"卫星"身份;轨道关系从动力学中涌现,以**相对除自己以外
-的系统质心**的瞬时根数形式被观测(ADR-0022:根星概念退役,渲染与烟迹
-均以全系统质心为参考系——近等质量双星系统不再有武断的"根星")。
+的系统质心**的瞬时根数形式被观测(ADR-0022:根星概念退役)。显示、网格、
+标签与烟迹则统一使用**固定世界原点**,不再随质心移动(ADR-0035)。
 时间以"自原点经过的秒数"计量,显示为 yyyy-mm-dd From origin。
 
 **推演不可逆(ADR-0018)**:时间只通过"推演"流动——设置时长与速度后,
@@ -75,7 +75,7 @@ python -m venv .venv
 `http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
 测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
-测试(102 项,含公开参照标定、风损封闭守恒、质心对齐与 desync 回归):
+测试(103 项,含公开参照标定、风损封闭守恒、固定原点与 desync 回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -105,7 +105,7 @@ J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
 src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
 server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         102 项标定、守恒与积分验收测试
+tests/         103 项标定、守恒与积分验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)

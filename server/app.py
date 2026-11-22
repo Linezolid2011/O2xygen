@@ -862,14 +862,13 @@ def api_get_sky(query):
     with WS.lock:                             # snapshot only; no integration
         ps = WS.sim.sim.particles
         idx = WS.sim._index
-        names = list(idx)
-        ms = np.array([ps[idx[n]].m for n in names])
-        pos = np.array([ps[idx[n]].xyz for n in names])
-        bcm = (ms[:, None] * pos).sum(axis=0) / ms.sum()
-        r_rel = (pos[names.index(body)] - bcm) if body is not None else np.zeros(3)
+        pos = np.array([p.xyz for p in ps])
+        # ADR-0035: world_to_icrs_pc expects ABSOLUTE world coordinates.
+        # The fixed world origin, not the moving barycenter, anchors the sky.
+        r_world = pos[idx[body]] if body is not None else np.zeros(3)
         t_s = WS.sim.t_s
         frame = normalize_astro_frame(SYSTEM.astro_frame)
-    observer = world_to_icrs_pc(frame, r_rel, t_s)
+    observer = world_to_icrs_pc(frame, r_world, t_s)
     year = julian_year(frame, t_s)
     sky = _sky_catalog().observe(observer, year, mlim)
     dirs = quat_rotate(frame["world_to_icrs_quat_wxyz"], sky["dir_icrs"],
@@ -926,11 +925,7 @@ def _sse_loop(h: "Handler") -> None:
                     t_s = ws.sim.t_s
                     if t_s != last_pose_t:
                         ps = ws.sim.sim.particles
-                        mm = np.array([q.m for q in ps])
-                        arr = np.array([q.xyz for q in ps])
-                        bcm = (mm[:, None] * arr).sum(axis=0) / mm.sum()
                         pose = {"t_days": t_s / DAY,
-                                "bcm": [float(x) for x in bcm],
                                 "p": {n: [float(ps[i].x), float(ps[i].y), float(ps[i].z)]
                                       for n, i in ws.sim._index.items()}}
                 if pose is not None:

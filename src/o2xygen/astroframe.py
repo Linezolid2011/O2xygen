@@ -5,8 +5,9 @@ Canonical frame: heliocentric ICRS. The raw Hipparcos catalog copied under
 only defines the WORLD'S placement and does not load or advance star catalogs.
 
 The world has arbitrary inertial Cartesian axes in metres. `astro_frame` pins
-its barycenter to a heliocentric ICRS position and its axes to ICRS through a
-fixed quaternion. It also maps simulation t=0 to an absolute Julian date so
+its FIXED coordinate origin O=(0,0,0) to a heliocentric ICRS position and its
+axes to ICRS through a fixed quaternion (ADR-0035); the moving barycenter does
+not redefine this anchor. It also maps simulation t=0 to an absolute Julian date so
 future sky rendering can propagate catalogs without losing time across saves.
 """
 from __future__ import annotations
@@ -93,7 +94,7 @@ def julian_year(frame: dict, t_s: float = 0.0) -> float:
 
 
 def position_at_epoch_pc(frame: dict, t_s: float = 0.0) -> np.ndarray:
-    """World barycenter's fixed heliocentric ICRS position.
+    """World coordinate origin's fixed heliocentric ICRS position (ADR-0035).
 
     t_s is accepted for a uniform transform API; space velocity is deliberately
     out of scope, so the translation does not change with time."""

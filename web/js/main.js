@@ -94,7 +94,7 @@ async function boot() {
     const m = JSON.parse(e.data);
     streamLive = true;
     currentDays = m.t_days;
-    scene.setPose(m.p, m.t_days, m.bcm);
+    scene.setPose(m.p, m.t_days);
   });
   es.onerror = () => { streamLive = false; };   // poll fallback covers poses/meta
 

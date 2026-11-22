@@ -296,30 +296,18 @@ export class OrbitScene {
     if (!this.pose || allowPose) {
       const p = {};
       for (const [n, b] of Object.entries(snap.bodies ?? {})) p[n] = b.p;
-      this.setPose(p, snap.t_days, this._bcmOf(p));
+      this.setPose(p, snap.t_days);
     }
     this._starBase = this._starBase ?? {};      // first snapshot = scale baseline
     this.updateStars(snap);
   }
 
-  /** Barycenter of a {name: [x,y,z]} position map, using the masses from
-   *  the latest meta snapshot (degraded path only; SSE poses carry bcm). */
-  _bcmOf(p) {
-    let mx = 0, my = 0, mz = 0, mt = 0;
-    for (const [n, q] of Object.entries(p)) {
-      const m = this.snap?.bodies?.[n]?.m ?? 0;
-      mx += m * q[0]; my += m * q[1]; mz += m * q[2]; mt += m;
-    }
-    return mt > 0 ? [mx / mt, my / mt, mz / mt] : [0, 0, 0];
-  }
-
-  /** Append one authoritative pose to the fixed-size client history. */
-  setPose(p, tDays, bcm) {
+  /** Append one ABSOLUTE-origin pose to the fixed-size client history. */
+  setPose(p, tDays) {
     if (this.pose && tDays < this.pose.t_days - 1e-9) {
       this.clearTrails();            // rollback: discard the cancelled future
     }
-    const origin = bcm ?? this._bcmOf(p);
-    this.pose = { p, t_days: tDays, bcm: origin };
+    this.pose = { p, t_days: tDays };
     if (this.trailLastTime !== null && tDays === this.trailLastTime) return;
 
     const slot = this.trailHead;
@@ -327,9 +315,9 @@ export class OrbitScene {
       const q = p[name];
       if (!q) continue;
       const j = slot * 3;
-      t.history[j] = q[0] - origin[0];
-      t.history[j + 1] = q[1] - origin[1];
-      t.history[j + 2] = q[2] - origin[2];
+      t.history[j] = q[0];
+      t.history[j + 1] = q[1];
+      t.history[j + 2] = q[2];
     }
     this.trailHead = (slot + 1) % TRAIL_CAPACITY;
     this.trailCount = Math.min(this.trailCount + 1, TRAIL_CAPACITY);
@@ -523,14 +511,13 @@ export class OrbitScene {
       this.camera.near = near;
       this.camera.updateProjectionMatrix();
     }
-    // ADR-0022: the render frame is BARYCENTRIC - everything is drawn at
-    // (absolute position - system barycenter), all from server poses.
-    const op = this.pose?.bcm ?? [0, 0, 0];
+    // ADR-0035: draw absolute world coordinates.  The fixed origin O=(0,0,0)
+    // never moves with mass edits, body membership, winds or CCSN.
     for (const b of this.system.bodies) {
       const g = this.bodyGroups[b.name];
       if (!g) continue;
       const p = this._posOf(b.name);
-      g.position.set(p[0] - op[0], p[1] - op[1], p[2] - op[2]);
+      g.position.set(p[0], p[1], p[2]);
       // server spin state: axis + rate + phase at the snapshot's clock;
       // only the display phase advances between meta polls (ADR-0023)
       const sp = this.snap?.spins?.[b.name];
@@ -553,7 +540,7 @@ export class OrbitScene {
     const primary = this.system.bodies.find((b) => b.kind === "star");
     if (primary) {
       const p = this._posOf(primary.name);
-      this.starLight.position.set(p[0] - op[0], p[1] - op[1], p[2] - op[2]);
+      this.starLight.position.set(p[0], p[1], p[2]);
     }
   }
 
