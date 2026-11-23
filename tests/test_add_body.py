@@ -71,6 +71,8 @@ def test_orbit_preview_uses_only_parent_and_candidate(monkeypatch):
         2 * np.pi * np.sqrt((3 * AU)**3 / (G * (mp + mass))) / DAY)
     assert got["periapsis_m"] == pytest.approx(2.4 * AU)
     assert got["apoapsis_m"] == pytest.approx(3.6 * AU)
+    assert got["parent_radius_m"] == pytest.approx(
+        world.bodies[parent].radius_m)
     assert len(got["orbit_points"]) == 129
     assert len(got["major_axis"]) == 2
     # Every preview ellipse point uses the same parent origin, not the barycenter.

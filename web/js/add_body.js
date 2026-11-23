@@ -236,6 +236,8 @@ export function initBodyBuilder({ system, onCommitted }) {
         <canvas class="bb-canvas" aria-label="新天体三维预览"></canvas>
         <div class="bb-preview-empty">等待服务器预览…</div>
         <div class="bb-legend" hidden></div>
+        <div class="bb-body-label" data-label="candidate" hidden></div>
+        <div class="bb-body-label" data-label="parent" hidden></div>
         <div class="bb-view-hint">左键旋转 · 右键平移 · 滚轮缩放</div>
       </div>
     </div>`;
@@ -249,6 +251,8 @@ export function initBodyBuilder({ system, onCommitted }) {
   const parentsBox = root.querySelector(".bb-parents");
   const empty = root.querySelector(".bb-preview-empty");
   const legend = root.querySelector(".bb-legend");
+  const candidateLabel = root.querySelector('[data-label="candidate"]');
+  const parentLabel = root.querySelector('[data-label="parent"]');
   const out = (key) => root.querySelector(`[data-out="${key}"]`);
 
   let opened = false;
@@ -592,31 +596,34 @@ export function initBodyBuilder({ system, onCommitted }) {
   resizeObserver.observe(viewport);
 
   function boundsFor(response, placement) {
-    const min = new THREE.Vector3(0, 0, 0);
-    const max = new THREE.Vector3(0, 0, 0);
+    // The focus is semantic, not the ellipse bounding-box midpoint: parent for
+    // an orbital draft, the new body itself for a direct draft (user spec).
+    const focus = placement === "orbit" && validVec(response.parent_p)
+      ? new THREE.Vector3(...response.parent_p)
+      : new THREE.Vector3(...response.p);
+    let maxDistance = 0;
     const add = (p) => {
       if (!validVec(p)) return;
-      min.min(new THREE.Vector3(p[0], p[1], p[2]));
-      max.max(new THREE.Vector3(p[0], p[1], p[2]));
+      maxDistance = Math.max(maxDistance, focus.distanceTo(new THREE.Vector3(...p)));
     };
     add(response.p);
     if (placement === "orbit") {
-      add(response.parent_p);
       for (const p of response.orbit_points ?? []) add(p);
       for (const p of response.major_axis ?? []) add(p);
     }
-    const center = min.clone().add(max).multiplyScalar(0.5);
-    const radius = Math.max(max.clone().sub(min).length() * 0.5, AU * 0.35);
-    return { center, radius };
+    const radius = placement === "direct"
+      ? Math.max(response.radius_m * 8.0, AU * 1e-7)
+      : Math.max(maxDistance * 1.1, AU * 0.01);
+    return { focus, radius };
   }
 
   function fitPreview() {
     if (!latestBounds) return;
-    const { center, radius } = latestBounds;
+    const { focus, radius } = latestBounds;
     const aspectPenalty = Math.max(1, 1 / Math.max(camera.aspect, 0.1));
     const distance = radius / Math.sin(THREE.MathUtils.degToRad(camera.fov * 0.5)) * 1.3 * aspectPenalty;
-    controls.target.copy(center);
-    camera.position.copy(center).addScaledVector(cameraDirection, distance);
+    controls.target.copy(focus);
+    camera.position.copy(focus).addScaledVector(cameraDirection, distance);
     camera.near = Math.max(AU * 1e-7, radius / 2000);
     camera.far = Math.max(AU * 1000, radius * 100);
     camera.updateProjectionMatrix();
@@ -627,9 +634,9 @@ export function initBodyBuilder({ system, onCommitted }) {
   function drawPreview(response, placement) {
     latestBounds = boundsFor(response, placement);
     const visualScale = latestBounds.radius;
-    const markerRadius = visualScale * 0.018;
-    candidate.scale.setScalar(markerRadius);
-    parentMarker.scale.setScalar(markerRadius * 0.8);
+    // TRUE physical radii in metres, never a scene-dependent pseudo radius.
+    candidate.scale.setScalar(response.radius_m);
+    parentMarker.scale.setScalar(response.parent_radius_m ?? 1.0);
 
     candidate.visible = validVec(response.p);
     if (candidate.visible) {
@@ -652,6 +659,8 @@ export function initBodyBuilder({ system, onCommitted }) {
     if (parentMarker.visible) {
       parentMarker.position.set(response.parent_p[0], response.parent_p[1], response.parent_p[2]);
     }
+    candidateLabel.textContent = response.name || "未命名";
+    parentLabel.textContent = response.parent || "";
 
     const points = !direct && Array.isArray(response.orbit_points)
       ? response.orbit_points.filter(validVec) : [];
@@ -687,7 +696,7 @@ export function initBodyBuilder({ system, onCommitted }) {
     } else {
       majorGeometry.setDrawRange(0, 0);
     }
-    if (frameNeeded) fitPreview();
+    fitPreview();                     // automatic semantic center on every draft
   }
 
   function clearPreviewDrawing() {
@@ -702,16 +711,38 @@ export function initBodyBuilder({ system, onCommitted }) {
     lastPreview = null;
     lastPlacement = null;
     frameNeeded = true;
+    candidateLabel.hidden = true;
+    parentLabel.hidden = true;
     legend.hidden = true;
     legend.textContent = "";
     empty.hidden = false;
     empty.textContent = "等待服务器预览…";
   }
 
+  const projectedLabelPosition = new THREE.Vector3();
+  function positionBodyLabel(object, label) {
+    if (!object.visible || !label.textContent) {
+      label.hidden = true;
+      return;
+    }
+    projectedLabelPosition.copy(object.position).project(camera);
+    const x = (projectedLabelPosition.x * 0.5 + 0.5) * viewport.clientWidth;
+    const y = (-projectedLabelPosition.y * 0.5 + 0.5) * viewport.clientHeight;
+    const visible = projectedLabelPosition.z >= -1 && projectedLabelPosition.z <= 1 &&
+      x >= 0 && x <= viewport.clientWidth && y >= 0 && y <= viewport.clientHeight;
+    label.hidden = !visible;
+    if (visible) {
+      label.style.left = `${x}px`;
+      label.style.top = `${y - 8}px`;
+    }
+  }
+
   function renderFrame() {
     if (!opened) return;
     controls.update();
     renderer.render(scene, camera);
+    positionBodyLabel(candidate, candidateLabel);
+    positionBodyLabel(parentMarker, parentLabel);
     raf = requestAnimationFrame(renderFrame);
   }
 
@@ -801,6 +832,9 @@ export function initBodyBuilder({ system, onCommitted }) {
     open, close,
     get preview() { return lastPreview; },  // read-only diagnostics/testing
     get scene() { return scene; },
+    get controls() { return controls; },
+    get candidate() { return candidate; },
+    get parentMarker() { return parentMarker; },
     get velocityArrow() { return velocityArrow; },
     get orbitLine() { return orbitLine; },
   };

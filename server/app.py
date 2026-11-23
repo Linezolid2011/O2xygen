@@ -708,7 +708,7 @@ def _body_draft(data: dict):
 def _draft_placement(data: dict, mass_kg: float):
     """Pure direct/two-body placement; no hierarchy is created or persisted."""
     placement = _body_str(data, "placement", "direct")
-    parent = parent_p = None
+    parent = parent_p = parent_radius = None
     period = peri = apo = None
     orbit_points, major_axis = [], []
     if placement == "direct":
@@ -743,6 +743,7 @@ def _draft_placement(data: dict, mass_kg: float):
         states = WS.sim.live_state()
         rp, vp = states[parent]
         mp = WS.sim.sim.particles[WS.sim._index[parent]].m
+        parent_radius = float(SYSTEM.bodies[parent].radius_m)
         mu = G * (mp + mass_kg)       # ONLY parent + candidate, by user spec
         base = Elements(a_m=a, e=e, inc=np.radians(inc),
                         raan=np.radians(raan), argp=np.radians(argp))
@@ -762,6 +763,7 @@ def _draft_placement(data: dict, mass_kg: float):
     return {"p": [float(x) for x in pos], "v": [float(x) for x in vel],
             "parent": parent,
             "parent_p": None if parent_p is None else [float(x) for x in parent_p],
+            "parent_radius_m": parent_radius,
             "period_days": period, "periapsis_m": peri, "apoapsis_m": apo,
             "orbit_points": orbit_points, "major_axis": major_axis}
 
