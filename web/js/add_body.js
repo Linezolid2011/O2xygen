@@ -7,6 +7,7 @@ import { AU } from "./kepler.js";
 import { teffColor } from "./scene3d.js";
 
 const PREVIEW_DELAY_MS = 120;
+const SCIENTIFIC_NUMBER_FIELDS = new Set(["mass_value", "radius_value", "a_value"]);
 const MODEL_LABELS = {
   mist: "MIST 轨道",
   mist3_wd: "MIST III · WD 冷却",
@@ -165,15 +166,16 @@ export function initBodyBuilder({ system, onCommitted }) {
           <div class="bb-section-title">非恒星物理输入</div>
           <div class="bb-label">质量</div>
           <div class="bb-unit-row">
-            <input type="number" data-field="mass_value" min="0" step="any" aria-label="质量数值">
+            <input type="text" inputmode="decimal" data-field="mass_value" aria-label="质量数值">
             <div class="mode-switch bb-switch" data-switch="mass_unit" aria-label="质量单位">
               <button type="button" class="pill" data-value="earth">M⊕</button>
               <button type="button" class="pill" data-value="jupiter">M♃</button>
+              <button type="button" class="pill" data-value="kg">kg</button>
             </div>
           </div>
           <div class="bb-label">半径</div>
           <div class="bb-unit-row">
-            <input type="number" data-field="radius_value" min="0" step="any" aria-label="半径数值">
+            <input type="text" inputmode="decimal" data-field="radius_value" aria-label="半径数值">
             <div class="mode-switch bb-switch" data-switch="radius_unit" aria-label="半径单位">
               <button type="button" class="pill" data-value="earth">R⊕</button>
               <button type="button" class="pill" data-value="km">km</button>
@@ -225,7 +227,7 @@ export function initBodyBuilder({ system, onCommitted }) {
             <div>
               <div class="bb-label">半长轴</div>
               <div class="bb-unit-row">
-                <input type="number" data-field="a_value" min="0" step="any"
+                <input type="text" inputmode="decimal" data-field="a_value"
                        aria-label="半长轴数值">
                 <div class="mode-switch bb-switch" data-switch="a_unit" aria-label="半长轴单位">
                   <button type="button" class="pill" data-value="au">AU</button>
@@ -572,8 +574,8 @@ export function initBodyBuilder({ system, onCommitted }) {
     } else if (el.type === "checkbox") {
       draft[key] = el.checked;
       syncControls();
-    } else if (el.type === "number") {
-      draft[key] = el.valueAsNumber;
+    } else if (el.type === "number" || SCIENTIFIC_NUMBER_FIELDS.has(key)) {
+      draft[key] = el.value.trim() === "" ? NaN : Number(el.value);
     } else {
       draft[key] = el.value;
     }

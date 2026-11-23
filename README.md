@@ -61,7 +61,8 @@ MIST 运行时求值,不另存副本(ADR-0022/0026)。schema v2 另存权威逃�
   完整开普勒轨道预览;确认只保存绝对 p/v,不保留层级(ADR-0036)。预览球体
   使用真实半径并显示名称标签,轨道以母星居中、直接放置以新天体居中;
   新恒星和恒星母星另显示 Teff 着色的光晕;半长轴单位可用同款滑块在
-  AU 与 km 间切换;轨道预览另以红色状态栏提示双向刚体洛希极限问题。
+  AU 与 km 间切换,质量也支持 kg;质量/半径/半长轴接受 `1.23e4` 科学计数法;
+  轨道预览另以红色状态栏提示双向刚体洛希极限问题。
 - **温度管线**:三种平衡温度体制 + 反照率,温度表从当前时刻向前采样。
 - **WebUI**:标准库 http.server + SSE 推流 + Three.js + uPlot,无构建步骤;
   服务器权威位姿、客户端零物理的固定容量烟迹环形缓冲区、**Hipparcos
@@ -83,7 +84,7 @@ python -m venv .venv
 `http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
 测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
-测试(117 项,含公开参照标定、风损封闭守恒、固定原点与放置/关闭回归):
+测试(118 项,含公开参照标定、风损封闭守恒、固定原点与放置/关闭回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -113,7 +114,7 @@ J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
 src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
 server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         115 项标定、守恒与交互验收测试
+tests/         118 项标定、守恒与交互验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)

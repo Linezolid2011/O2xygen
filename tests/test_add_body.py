@@ -98,6 +98,22 @@ def test_semimajor_km_unit_matches_equivalent_au(monkeypatch):
     np.testing.assert_allclose(km["p"], au["p"], rtol=0, atol=1e-3)
 
 
+def test_kg_mass_and_scientific_notation_for_all_lengths(monkeypatch):
+    import app
+    world = build_preset()
+    ws = Workspace(world, grid_getter=None)
+    monkeypatch.setattr(app, "SYSTEM", world)
+    monkeypatch.setattr(app, "WS", ws)
+    got = app.api_add_body_preview(_direct(
+        mass_value="1.23e4", mass_unit="kg",
+        radius_value="6.371e3", radius_unit="km",
+        placement="orbit", parent="Vesper",
+        a_value="1.495978707e8", a_unit="km"))
+    assert got["mass_kg"] == pytest.approx(12300.0)
+    assert got["radius_m"] == pytest.approx(6371000.0)
+    assert got["a_m"] == pytest.approx(AU)
+
+
 def test_roche_warns_candidate_periapsis_but_not_safe_orbit(monkeypatch):
     import app
     world = build_preset()

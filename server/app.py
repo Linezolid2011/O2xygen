@@ -692,9 +692,10 @@ def _body_draft(data: dict):
         _finite([mv, rv, albedo])
         if mv <= 0.0 or rv <= 0.0 or not (0.0 <= albedo <= 1.0):
             raise HttpError(400, "质量/半径须为正,反照率须在 0–1")
-        if mu not in ("earth", "jupiter") or ru not in ("earth", "km"):
+        if mu not in ("earth", "jupiter", "kg") or ru not in ("earth", "km"):
             raise HttpError(400, "未知质量或半径单位")
-        mass = mv * (M_EARTH if mu == "earth" else M_JUPITER)
+        mass = (mv if mu == "kg" else
+                mv * (M_EARTH if mu == "earth" else M_JUPITER))
         radius = rv * R_EARTH_MEAN if ru == "earth" else rv * 1000.0
         rho = 3.0 * mass / (4.0 * np.pi * radius**3)
         candidate = Body(name, BODY, mass_kg=mass, radius_m=radius,
