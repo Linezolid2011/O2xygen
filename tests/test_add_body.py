@@ -73,6 +73,8 @@ def test_orbit_preview_uses_only_parent_and_candidate(monkeypatch):
     assert got["apoapsis_m"] == pytest.approx(3.6 * AU)
     assert got["parent_radius_m"] == pytest.approx(
         world.bodies[parent].radius_m)
+    assert got["parent_kind"] == "star"
+    assert got["parent_teff_k"] > 0.0
     assert len(got["orbit_points"]) == 129
     assert len(got["major_axis"]) == 2
     # Every preview ellipse point uses the same parent origin, not the barycenter.

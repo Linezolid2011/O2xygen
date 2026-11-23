@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { OrbitControls } from "/vendor/OrbitControls.js";
 import { api } from "./api.js";
 import { AU } from "./kepler.js";
+import { teffColor } from "./scene3d.js";
 
 const PREVIEW_DELAY_MS = 120;
 const MODEL_LABELS = {
@@ -25,6 +26,42 @@ function sci(value) {
 function validVec(v) {
   return Array.isArray(v) && v.length >= 3 &&
     Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2]);
+}
+
+let stellarGlowMap = null;
+function stellarGlowTexture() {
+  if (stellarGlowMap) return stellarGlowMap;
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d");
+  const gradient = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gradient.addColorStop(0, "rgba(255,255,255,0.95)");
+  gradient.addColorStop(0.22, "rgba(255,244,224,0.55)");
+  gradient.addColorStop(0.55, "rgba(255,224,176,0.18)");
+  gradient.addColorStop(1, "rgba(255,220,160,0)");
+  g.fillStyle = gradient;
+  g.fillRect(0, 0, 128, 128);
+  stellarGlowMap = new THREE.CanvasTexture(c);
+  return stellarGlowMap;
+}
+
+function makeStellarGlow() {
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: stellarGlowTexture(), transparent: true, opacity: 0.85,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }));
+  glow.visible = false;
+  return glow;
+}
+
+function updateStellarGlow(glow, radius_m, visible, teff_k) {
+  glow.visible = visible;
+  if (!visible) return;
+  glow.material.color.copy(teffColor(teff_k ?? 5772.0));
+  // Local scale is multiplied by the sphere's TRUE radius.  The small floor
+  // is only a glow/visibility aid, never a change to the physical sphere.
+  const scale = Math.max(2.6, AU * 0.0006 / radius_m);
+  glow.scale.set(scale, scale, 1.0);
 }
 
 export function initBodyBuilder({ system, onCommitted }) {
@@ -551,6 +588,10 @@ export function initBodyBuilder({ system, onCommitted }) {
   const markerGeometry = new THREE.SphereGeometry(1, 20, 12);
   const candidate = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: 0x7aa2e8 }));
   const parentMarker = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: 0xe8b27d }));
+  const candidateGlow = makeStellarGlow();
+  const parentGlow = makeStellarGlow();
+  candidate.add(candidateGlow);
+  parentMarker.add(parentGlow);
   candidate.visible = parentMarker.visible = false;
   scene.add(candidate, parentMarker);
 
@@ -661,6 +702,11 @@ export function initBodyBuilder({ system, onCommitted }) {
     }
     candidateLabel.textContent = response.name || "未命名";
     parentLabel.textContent = response.parent || "";
+    updateStellarGlow(candidateGlow, response.radius_m,
+      candidate.visible && response.kind === "star", response.star?.teff_k);
+    updateStellarGlow(parentGlow, response.parent_radius_m ?? 1.0,
+      parentMarker.visible && response.parent_kind === "star",
+      response.parent_teff_k);
 
     const points = !direct && Array.isArray(response.orbit_points)
       ? response.orbit_points.filter(validVec) : [];
@@ -702,6 +748,8 @@ export function initBodyBuilder({ system, onCommitted }) {
   function clearPreviewDrawing() {
     candidate.visible = false;
     parentMarker.visible = false;
+    candidateGlow.visible = false;
+    parentGlow.visible = false;
     velocityArrow.visible = false;
     orbitLine.visible = false;
     majorLine.visible = false;
@@ -835,6 +883,8 @@ export function initBodyBuilder({ system, onCommitted }) {
     get controls() { return controls; },
     get candidate() { return candidate; },
     get parentMarker() { return parentMarker; },
+    get candidateGlow() { return candidateGlow; },
+    get parentGlow() { return parentGlow; },
     get velocityArrow() { return velocityArrow; },
     get orbitLine() { return orbitLine; },
   };
