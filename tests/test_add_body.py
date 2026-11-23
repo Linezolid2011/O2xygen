@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
 
-from o2xygen.constants import AU, DAY, G, M_EARTH, R_EARTH_MEAN
+from o2xygen.constants import AU, DAY, G, M_EARTH, R_EARTH_MEAN, R_SUN
 from o2xygen import world as world_mod
 from o2xygen.kepler import solve_kepler
 from preset import build_preset
@@ -96,6 +96,46 @@ def test_semimajor_km_unit_matches_equivalent_au(monkeypatch):
     assert km["a_m"] == pytest.approx(3.0 * AU)
     assert km["period_days"] == pytest.approx(au["period_days"])
     np.testing.assert_allclose(km["p"], au["p"], rtol=0, atol=1e-3)
+
+
+def test_roche_warns_candidate_periapsis_but_not_safe_orbit(monkeypatch):
+    import app
+    world = build_preset()
+    ws = Workspace(world, grid_getter=None)
+    monkeypatch.setattr(app, "SYSTEM", world)
+    monkeypatch.setattr(app, "WS", ws)
+    got = app.api_add_body_preview(_direct(
+        placement="orbit", parent="Vesper", a_au=0.0001, e=0.0))
+    assert got["roche"]["candidate_violation"] is True
+    assert got["roche"]["parent_violation"] is False
+    assert "洛希极限" in got["roche"]["messages"][0]
+    safe = app.api_add_body_preview(_direct(
+        placement="orbit", parent="Vesper", a_au=10.0, e=0.0))
+    assert safe["roche"]["candidate_violation"] is False
+    assert safe["roche"]["parent_violation"] is False
+    assert safe["roche"]["messages"] == []
+
+
+def test_roche_warns_when_parent_is_inside_candidate_limit(monkeypatch):
+    import app
+    world = build_preset()
+    ws = Workspace(world, grid_getter=None)
+    monkeypatch.setattr(app, "SYSTEM", world)
+    monkeypatch.setattr(app, "WS", ws)
+    monkeypatch.setattr(app, "_grid_getter", lambda: object())
+    class P:
+        mass_msun = 100.0
+        radius_m = R_SUN
+        luminosity_w = 3.828e26
+        teff_k = 5772.0
+        mdot_msun_per_yr = 1e-13
+    monkeypatch.setattr(app, "_evaluate_stellar", lambda *args, **kwargs: P())
+    got = app.api_add_body_preview(_direct(
+        kind="star", placement="orbit", parent="Vesper", a_au=0.01,
+        mini_msun=100.0, feh=0.0, age0_gyr=1.0))
+    assert got["roche"]["candidate_violation"] is False
+    assert got["roche"]["parent_violation"] is True
+    assert "母星将位于" in got["roche"]["messages"][0]
 
 
 def test_confirm_preserves_exact_draft_state_and_reloads_save(tmp_path,

@@ -535,7 +535,12 @@ export function initBodyBuilder({ system, onCommitted }) {
       legend.textContent = payload.placement === "orbit" && response.parent
         ? `候选：${response.name || payload.name}　参考：${response.parent}`
         : `候选：${response.name || payload.name}　绝对世界坐标`;
-      setStatus("预览已更新 · 尚未保存");
+      const rocheMessages = response.roche?.messages ?? [];
+      if (rocheMessages.length) {
+        setStatus(`洛希极限问题：${rocheMessages.join("；")}`, true);
+      } else {
+        setStatus("预览已更新 · 尚未保存");
+      }
     } catch (error) {
       if (!opened || serial !== previewSerial || token !== session) return;
       setStatus(error.message || "预览失败", true);

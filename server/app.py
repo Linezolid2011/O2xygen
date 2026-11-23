@@ -705,12 +705,13 @@ def _body_draft(data: dict):
     return candidate, star_out, nonstar_out
 
 
-def _draft_placement(data: dict, mass_kg: float):
+def _draft_placement(data: dict, mass_kg: float, radius_m: float | None = None):
     """Pure direct/two-body placement; no hierarchy is created or persisted."""
     placement = _body_str(data, "placement", "direct")
     parent = parent_p = parent_radius = None
     parent_kind = parent_teff = None
     a_m = period = peri = apo = None
+    roche = None
     orbit_points, major_axis = [], []
     if placement == "direct":
         xyz = [_body_float(data, k, 0.0) for k in ("x_au", "y_au", "z_au")]
@@ -769,6 +770,22 @@ def _draft_placement(data: dict, mass_kg: float):
             r, _ = elements_to_state(base, mu, (E - e * np.sin(E)) / n)
             orbit_points.append([float(x) for x in rp + r])
         major_axis = [orbit_points[0], orbit_points[64]]
+        if radius_m is not None and parent_radius > 0.0 and radius_m > 0.0 \
+                and mp > 0.0 and mass_kg > 0.0:
+            candidate_limit = parent_radius * (mp / mass_kg) ** (1.0 / 3.0)
+            parent_limit = radius_m * (mass_kg / mp) ** (1.0 / 3.0)
+            candidate_bad = peri < candidate_limit
+            parent_bad = peri < parent_limit
+            messages = []
+            if candidate_bad:
+                messages.append("被添加天体的近日点低于母星的刚体洛希极限")
+            if parent_bad:
+                messages.append("母星将位于被添加天体的刚体洛希极限内")
+            roche = {"candidate_limit_m": candidate_limit,
+                     "parent_limit_m": parent_limit,
+                     "candidate_violation": candidate_bad,
+                     "parent_violation": parent_bad,
+                     "messages": messages}
     else:
         raise HttpError(400, "未知放置方式")
     return {"p": [float(x) for x in pos], "v": [float(x) for x in vel],
@@ -776,7 +793,7 @@ def _draft_placement(data: dict, mass_kg: float):
             "parent_p": None if parent_p is None else [float(x) for x in parent_p],
             "parent_radius_m": parent_radius,
             "parent_kind": parent_kind, "parent_teff_k": parent_teff,
-            "a_m": a_m,
+            "a_m": a_m, "roche": roche,
             "period_days": period, "periapsis_m": peri, "apoapsis_m": apo,
             "orbit_points": orbit_points, "major_axis": major_axis}
 
@@ -784,7 +801,7 @@ def _draft_placement(data: dict, mass_kg: float):
 def _draft_response(data: dict):
     candidate, star, nonstar = _body_draft(data)
     with WS.lock:
-        placement = _draft_placement(data, candidate.mass_kg)
+        placement = _draft_placement(data, candidate.mass_kg, candidate.radius_m)
     return {"kind": candidate.kind, "name": candidate.name,
             "mass_kg": candidate.mass_kg, "radius_m": candidate.radius_m,
             "albedo": candidate.albedo, "star": star, "nonstar": nonstar,
