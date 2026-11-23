@@ -210,7 +210,7 @@ export class OrbitScene {
       this.scene.add(line);
       this.trailByName[b.name] = {
         line, baseColor: this._trailColor(b), background: new THREE.Color(0x0a0c11),
-        history: new Float32Array(TRAIL_CAPACITY * 3), positions, colors,
+        history: new Float64Array(TRAIL_CAPACITY * 3), positions, colors,
       };
     }
   }
@@ -335,18 +335,26 @@ export class OrbitScene {
     }
   }
 
-  /** Copy ring order into preallocated GPU arrays only when a pose arrives. */
+  /** Copy ring order into preallocated LOCAL-position GPU arrays.
+   *  ADR-0035 keeps absolute world positions in history; the newest point is
+   *  only a numerical render anchor.  At hundreds of AU, feeding absolute
+   *  coordinates to Float32 loses ~0.004 AU of subpixel motion and makes the
+   *  line visibly staircase.  Subtracting the newest point before upload keeps
+   *  all small relative motion while preserving the exact same world geometry. */
   _refreshTrails() {
     const n = this.trailCount;
     if (n < 2) return;
     const start = (this.trailHead - n + TRAIL_CAPACITY) % TRAIL_CAPACITY;
+    const newest = ((this.trailHead - 1 + TRAIL_CAPACITY) % TRAIL_CAPACITY) * 3;
     for (const t of Object.values(this.trailByName)) {
+      t.line.position.set(t.history[newest], t.history[newest + 1],
+                          t.history[newest + 2]);
       for (let i = 0; i < n; i++) {
         const src = ((start + i) % TRAIL_CAPACITY) * 3;
         const dst = i * 3;
-        t.positions[dst] = t.history[src];
-        t.positions[dst + 1] = t.history[src + 1];
-        t.positions[dst + 2] = t.history[src + 2];
+        t.positions[dst] = t.history[src] - t.history[newest];
+        t.positions[dst + 1] = t.history[src + 1] - t.history[newest + 1];
+        t.positions[dst + 2] = t.history[src + 2] - t.history[newest + 2];
         const k = Math.pow(i / (n - 1), 1.6);  // oldest faint, newest full
         t.colors[dst] = t.background.r + (t.baseColor.r - t.background.r) * k;
         t.colors[dst + 1] = t.background.g + (t.baseColor.g - t.background.g) * k;
