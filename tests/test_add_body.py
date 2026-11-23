@@ -82,6 +82,22 @@ def test_orbit_preview_uses_only_parent_and_candidate(monkeypatch):
                                np.array(got["major_axis"][0]) - rp)
 
 
+def test_semimajor_km_unit_matches_equivalent_au(monkeypatch):
+    import app
+    world = build_preset()
+    ws = Workspace(world, grid_getter=None)
+    monkeypatch.setattr(app, "SYSTEM", world)
+    monkeypatch.setattr(app, "WS", ws)
+    base = _direct(placement="orbit", parent="Vesper", a_au=3.0, e=0.2)
+    au = app.api_add_body_preview(base)
+    km = app.api_add_body_preview(_direct(
+        placement="orbit", parent="Vesper", a_value=3.0 * AU / 1000.0,
+        a_unit="km", e=0.2))
+    assert km["a_m"] == pytest.approx(3.0 * AU)
+    assert km["period_days"] == pytest.approx(au["period_days"])
+    np.testing.assert_allclose(km["p"], au["p"], rtol=0, atol=1e-3)
+
+
 def test_confirm_preserves_exact_draft_state_and_reloads_save(tmp_path,
                                                                monkeypatch):
     import app

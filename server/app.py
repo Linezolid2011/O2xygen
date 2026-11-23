@@ -710,7 +710,7 @@ def _draft_placement(data: dict, mass_kg: float):
     placement = _body_str(data, "placement", "direct")
     parent = parent_p = parent_radius = None
     parent_kind = parent_teff = None
-    period = peri = apo = None
+    a_m = period = peri = apo = None
     orbit_points, major_axis = [], []
     if placement == "direct":
         xyz = [_body_float(data, k, 0.0) for k in ("x_au", "y_au", "z_au")]
@@ -730,7 +730,15 @@ def _draft_placement(data: dict, mass_kg: float):
         parent = _body_str(data, "parent", required=True)
         if parent not in SYSTEM.bodies:
             raise HttpError(400, "母星不存在")
-        a = _body_float(data, "a_au", 1.0) * AU
+        a_value = _body_float(data, "a_value", None)
+        if a_value is None:                    # legacy AU-only callers
+            a = _body_float(data, "a_au", 1.0) * AU
+        else:
+            a_unit = _body_str(data, "a_unit", "au")
+            if a_unit not in ("au", "km"):
+                raise HttpError(400, "半长轴单位须为 AU 或 km")
+            a = a_value * (AU if a_unit == "au" else 1000.0)
+        a_m = a
         e = _body_float(data, "e", 0.0)
         inc = _body_float(data, "inc_deg", 0.0)
         raan = _body_float(data, "raan_deg", 0.0)
@@ -768,6 +776,7 @@ def _draft_placement(data: dict, mass_kg: float):
             "parent_p": None if parent_p is None else [float(x) for x in parent_p],
             "parent_radius_m": parent_radius,
             "parent_kind": parent_kind, "parent_teff_k": parent_teff,
+            "a_m": a_m,
             "period_days": period, "periapsis_m": peri, "apoapsis_m": apo,
             "orbit_points": orbit_points, "major_axis": major_axis}
 

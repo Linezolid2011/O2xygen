@@ -222,9 +222,17 @@ export function initBodyBuilder({ system, onCommitted }) {
           <div class="bb-section-title">参考天体 · 单选</div>
           <div class="bb-parents" role="radiogroup" aria-label="已有参考天体"></div>
           <div class="bb-grid">
-            <label class="bb-field">半长轴 (AU)
-              <input type="number" data-field="a_au" min="0" step="any">
-            </label>
+            <div>
+              <div class="bb-label">半长轴</div>
+              <div class="bb-unit-row">
+                <input type="number" data-field="a_value" min="0" step="any"
+                       aria-label="半长轴数值">
+                <div class="mode-switch bb-switch" data-switch="a_unit" aria-label="半长轴单位">
+                  <button type="button" class="pill" data-value="au">AU</button>
+                  <button type="button" class="pill" data-value="km">km</button>
+                </div>
+              </div>
+            </div>
             <label class="bb-field">偏心率
               <input type="number" data-field="e" min="0" step="any">
             </label>
@@ -332,7 +340,8 @@ export function initBodyBuilder({ system, onCommitted }) {
       speed_azimuth_deg: 90.0,
       speed_elevation_deg: 0.0,
       parent: defaultParent(),
-      a_au: 1.0,
+      a_value: 1.0,
+      a_unit: "au",
       e: 0.0,
       inc_deg: 0.0,
       raan_deg: 0.0,
@@ -450,7 +459,8 @@ export function initBodyBuilder({ system, onCommitted }) {
     } else {
       Object.assign(p, {
         parent: draft.parent,
-        a_au: draft.a_au,
+        a_value: draft.a_value,
+        a_unit: draft.a_unit,
         e: draft.e,
         inc_deg: draft.inc_deg,
         raan_deg: draft.raan_deg,
