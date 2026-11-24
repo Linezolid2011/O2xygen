@@ -154,6 +154,29 @@ def test_roche_warns_when_parent_is_inside_candidate_limit(monkeypatch):
     assert "母星将位于" in got["roche"]["messages"][0]
 
 
+def test_stellar_orbit_roche_response_is_json_serializable(monkeypatch):
+    import app
+    world = build_preset()
+    ws = Workspace(world, grid_getter=None)
+    monkeypatch.setattr(app, "SYSTEM", world)
+    monkeypatch.setattr(app, "WS", ws)
+    monkeypatch.setattr(app, "_grid_getter", lambda: object())
+    class P:
+        mass_msun = np.float64(1.0)
+        radius_m = np.float64(R_SUN)
+        luminosity_w = np.float64(3.828e26)
+        teff_k = np.float64(5772.0)
+        mdot_msun_per_yr = np.float64(1e-13)
+    monkeypatch.setattr(app, "_evaluate_stellar", lambda *args, **kwargs: P())
+    got = app.api_add_body_preview(_direct(
+        kind="star", placement="orbit", parent="Vesper", a_au=0.01,
+        mini_msun=1.0, feh=0.0, age0_gyr=1.0))
+    assert isinstance(got["roche"]["candidate_violation"], bool)
+    assert isinstance(got["roche"]["parent_violation"], bool)
+    import json
+    json.dumps(got, allow_nan=False)  # regression: np.bool_ caused HTTP 500
+
+
 def test_confirm_preserves_exact_draft_state_and_reloads_save(tmp_path,
                                                                monkeypatch):
     import app

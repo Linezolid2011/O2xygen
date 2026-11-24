@@ -775,15 +775,16 @@ def _draft_placement(data: dict, mass_kg: float, radius_m: float | None = None):
                 and mp > 0.0 and mass_kg > 0.0:
             candidate_limit = parent_radius * (mp / mass_kg) ** (1.0 / 3.0)
             parent_limit = radius_m * (mass_kg / mp) ** (1.0 / 3.0)
-            candidate_bad = peri < candidate_limit
-            parent_bad = peri < parent_limit
+            # MIST returns NumPy scalars; np.bool_ is not JSON serializable.
+            candidate_bad = bool(peri < candidate_limit)
+            parent_bad = bool(peri < parent_limit)
             messages = []
             if candidate_bad:
                 messages.append("被添加天体的近日点低于母星的刚体洛希极限")
             if parent_bad:
                 messages.append("母星将位于被添加天体的刚体洛希极限内")
-            roche = {"candidate_limit_m": candidate_limit,
-                     "parent_limit_m": parent_limit,
+            roche = {"candidate_limit_m": float(candidate_limit),
+                     "parent_limit_m": float(parent_limit),
                      "candidate_violation": candidate_bad,
                      "parent_violation": parent_bad,
                      "messages": messages}

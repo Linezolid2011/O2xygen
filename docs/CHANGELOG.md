@@ -349,6 +349,14 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.2-rc8] - 2026-11-24
+
+### 恒星轨道预览 JSON 500 修复
+
+- 修复“恒星＋轨道添加”在洛希检查时返回 Internal Server Error:
+  MIST NumPy 标量比较产生 `np.bool_`,现显式转为原生 bool 与 float,
+  恢复可序列化响应。新增恒星轨道 JSON 与浏览器回归。
+
 ## [0.3.2-rc7] - 2026-11-23
 
 ### 远坐标烟迹局部精度修复
@@ -723,6 +731,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 回扫成本有安全阀(单次 ≤~2000 次积分调用);窗口集合变化 >10% 时缓存
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
+[0.3.2-rc8]: https://github.com/Linezolid2011/O2xygen/tree/0.3.2-rc8
 [0.3.2-rc7]: https://github.com/Linezolid2011/O2xygen/tree/0.3.2-rc7
 [0.3.2-rc6]: https://github.com/Linezolid2011/O2xygen/tree/0.3.2-rc6
 [0.3.2-rc5]: https://github.com/Linezolid2011/O2xygen/tree/0.3.2-rc5
