@@ -184,6 +184,20 @@ export function initBodyBuilder({ system, onCommitted }) {
           <label class="bb-field">反照率
             <input type="number" data-field="albedo" min="0" max="1" step="any">
           </label>
+          <div class="bb-grid">
+            <label class="bb-field">自转周期 (h；0 = 不转)
+              <input type="number" data-field="spin_period_h" min="0" step="any">
+            </label>
+            <label class="bb-field">初始自转相位 (°)
+              <input type="number" data-field="spin_phase_deg" step="any">
+            </label>
+          </div>
+          <div class="bb-label">自转轴（北极方向；服务器归一化）</div>
+          <div class="bb-grid bb-grid-3">
+            <label class="bb-field">X<input type="number" data-field="spin_axis" data-index="0" step="any"></label>
+            <label class="bb-field">Y<input type="number" data-field="spin_axis" data-index="1" step="any"></label>
+            <label class="bb-field">Z<input type="number" data-field="spin_axis" data-index="2" step="any"></label>
+          </div>
         </section>
 
         <section class="bb-card bb-readout" data-kind-section="body">
@@ -325,6 +339,7 @@ export function initBodyBuilder({ system, onCommitted }) {
       feh: 0.0,
       age0_gyr: 1.0,
       spin_period_h: 24.0,
+      spin_phase_deg: 0.0,
       spin_axis: [0, 0, 1],
       use_wdcool: false,
       wd_mass_msun: 0.6,
@@ -447,6 +462,9 @@ export function initBodyBuilder({ system, onCommitted }) {
         albedo: draft.albedo,
         radius_value: draft.radius_value,
         radius_unit: draft.radius_unit,
+        spin_period_h: draft.spin_period_h,
+        spin_phase_deg: draft.spin_phase_deg,
+        spin_axis: [...draft.spin_axis],
       });
     }
     if (draft.placement === "direct") {

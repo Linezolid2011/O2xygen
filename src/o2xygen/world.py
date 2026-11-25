@@ -4,11 +4,14 @@ A world is a FLAT N-body system. No hierarchy, no moons: bodies are either
 stars or non-stars, each with Cartesian initial conditions. Keplerian
 elements are a placement tool, never stored.
 
-Schema v2 (v1 remains readable; its missing wind ledger means a zero baseline):
+Schema v3 (v1/v2 remain readable; missing wind/points use empty baselines):
 {
   "format": "o2xygen-world",
-  "version": 2,
+  "version": 3,
   "name": "...",
+  "observations": [{"name", "body", "latitude_deg", "longitude_deg"}],
+  # Non-star extra.atmosphere stores spherical exponential-shell optical inputs.
+  # Observation points contain no cached Cartesian position or temperature.
   "origin": "<body name> or null",       # metadata only (ADR-0022)
   "wind": {                             # escaped-wind history (ADR-0030)
     "time_s": 0.0, "mass_kg": ...,
@@ -52,7 +55,7 @@ from .astroframe import normalize_astro_frame
 from .wind import WindLedger
 
 FORMAT = "o2xygen-world"
-VERSION = 2
+VERSION = 3
 
 
 def _json_safe(x):
@@ -105,17 +108,28 @@ def system_to_dict(system: System) -> dict:
             # free-form NON-MIST metadata only (tides, rings, atm, notes)
             extra = b.extra
             if b.kind == STAR:
+                if "atmosphere" in extra and extra["atmosphere"] is not None:
+                    raise ValueError("atmospheres are supported only on non-stellar bodies")
                 derived = {"mini_msun", "feh", "age0_gyr", "teff_k",
                            "luminosity_w", "evolution_model", "manual_override",
                            "manual_mass_kg"}
                 extra = {k: v for k, v in b.extra.items() if k not in derived}
+            else:
+                from .atmosphere import normalize_atmosphere
+                extra = dict(extra)
+                if extra.get("atmosphere") is None:
+                    extra.pop("atmosphere", None)
+                else:
+                    extra["atmosphere"] = normalize_atmosphere(extra["atmosphere"])
             if extra:
                 d["extra"] = _json_safe(extra)
             else:
                 d.pop("extra", None)
         bodies.append(d)
+    from .observation import validate_points
     return {"format": FORMAT, "version": VERSION, "name": system.name,
             "origin": system.origin, "bodies": bodies,
+            "observations": validate_points(system.observation_points, system.bodies),
             "wind": system.wind.to_dict(),
             "astro_frame": normalize_astro_frame(system.astro_frame)}
 
@@ -162,6 +176,11 @@ def dict_to_system(d: dict) -> System:
             mass_kg = float(bd["mass_kg"])
             radius_m = float(bd.get("radius_m", 0.0))
             luminosity_w = 0.0
+            if extra.get("atmosphere") is None:
+                extra.pop("atmosphere", None)
+            else:
+                from .atmosphere import normalize_atmosphere
+                extra["atmosphere"] = normalize_atmosphere(extra["atmosphere"])
         system.add(Body(
             bd["name"], kind,
             mass_kg=mass_kg,
@@ -176,6 +195,8 @@ def dict_to_system(d: dict) -> System:
             luminosity_w=luminosity_w,
             extra=extra,
         ))
+    from .observation import validate_points
+    system.observation_points = validate_points(d.get("observations"), system.bodies)
     return system
 
 

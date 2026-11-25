@@ -78,6 +78,9 @@ class System:
         self.bodies: dict[str, Body] = {}
         self.epoch_s = 0.0
         self.astro_frame = default_astro_frame()  # heliocentric ICRS/J2000 placement
+        # Named (body, latitude, longitude) inputs; world positions are derived
+        # at query time from the host's authoritative pose and spin phase.
+        self.observation_points: list[dict] = []
         # Escaped-wind history is dynamical state, not a MIST-derived output.
         self.wind = WindLedger()
 

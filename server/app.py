@@ -25,6 +25,7 @@ Errors are JSON {"detail": msg} with 400/404/409/413/503 as before.
 """
 import json
 import logging
+import math
 import mimetypes
 import os
 import socket
@@ -52,6 +53,9 @@ from o2xygen import mass_radius, structure as struct_mod
 from o2xygen import world as world_mod
 from o2xygen.astroframe import (normalize_astro_frame, position_radec,
                                 world_to_icrs_pc, julian_year, quat_rotate)
+from o2xygen.atmosphere import normalize_atmosphere, default_atmosphere, SphericalAtmosphere
+from o2xygen.observation import normalize_point, validate_points, local_frame, enu_angles
+from o2xygen.atmosphere_cache import optics_key, load_or_build_atmosphere, spectrum_rgb
 
 WEB_DIR = ROOT / "web"
 DOCS_DIR = ROOT / "docs"
@@ -286,7 +290,8 @@ def api_get_system():
             "origin": SYSTEM.origin,
             "version": VERSION,
             "engine": {"integrator": WS.sim.integrator, "dt_s": WS.sim.dt_s},
-            "bodies": [body_json(b) for b in SYSTEM.bodies.values()]}
+            "bodies": [body_json(b) for b in SYSTEM.bodies.values()],
+            "observations": [dict(p) for p in SYSTEM.observation_points]}
 
 
 def api_get_state(query):
@@ -602,6 +607,62 @@ def api_star_edit(body):
     return {"ok": True, "body": body_json(b)}
 
 
+# ------------------------------------------------------- non-star editing ---
+def api_body_edit(body):
+    """Commit non-star spin/atmosphere inputs without changing orbital state."""
+    if _evolution_active():
+        raise HttpError(409, "推演进行中,不能编辑天体")
+    name = _body_str(body, "name", required=True)
+    b = SYSTEM.bodies.get(name)
+    if b is None:
+        raise HttpError(404, f"no body '{name}'")
+    if b.kind != BODY:
+        raise HttpError(400, "此接口仅编辑非恒星天体")
+    period_h = _body_float(body, "spin_period_h", (b.rotation_period_s or 0) / 3600)
+    phase_deg = _body_float(body, "spin_phase_deg", np.degrees(b.spin_phase_rad))
+    _finite([period_h, phase_deg])
+    if period_h < 0.0:
+        raise HttpError(400, "自转周期不得为负；0 表示不自转")
+    axis = np.asarray(body.get("spin_axis", b.spin_axis), dtype=float)
+    if axis.shape != (3,) or not np.all(np.isfinite(axis)) or np.linalg.norm(axis) < 1e-15:
+        raise HttpError(400, "自转轴必须为三个有限且非零的数值")
+    axis = axis / np.linalg.norm(axis)
+    atmosphere = body.get("atmosphere", b.extra.get("atmosphere"))
+    try:
+        atmosphere = normalize_atmosphere(atmosphere)
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    with WS.lock:
+        # Editing spin creates a new phase definition at the CURRENT live
+        # epoch, not at the old save epoch. Snapshot rebasing preserves it.
+        b.set_spin_vector(axis * (2*np.pi / (period_h*3600) if period_h else 0),
+                          np.radians(phase_deg))
+        spins = WS._spin_map(WS.sim.t_s)
+        spins[name] = {"w": b.spin_vector(), "phase": b.spin_phase_rad}
+        WS._write_live_spins(spins, WS.sim.t_s)
+        if atmosphere is None:
+            b.extra.pop("atmosphere", None)
+        else:
+            b.extra["atmosphere"] = atmosphere
+    world_mod.save_world(WS.snapshot_for_save(), _world_path(CURRENT_WORLD))
+    return {"ok": True, "body": body_json(b)}
+
+
+def api_body_preview(body):
+    """Validate a non-star draft; no catalog, simulation or file mutation."""
+    name = _body_str(body, "name", required=True)
+    b = SYSTEM.bodies.get(name)
+    if b is None or b.kind != BODY:
+        raise HttpError(404, "no non-stellar body for preview")
+    try:
+        atmosphere = normalize_atmosphere(body.get("atmosphere"))
+        tau = SphericalAtmosphere(b.radius_m, atmosphere).vertical_optical_depth().tolist() \
+            if atmosphere is not None else None
+        return {"ok": True, "atmosphere": atmosphere, "zenith_optical_depth": tau}
+    except ValueError as e:
+        raise HttpError(400, str(e))
+
+
 # ------------------------------------------------------------- pipeline -----
 def api_pipeline(body):
     """One-click solve: 结构 -> 大气/光学厚度 -> 温度表 (synchronous v1)."""
@@ -699,6 +760,19 @@ def _body_draft(data: dict):
         mv = _body_float(data, "mass_value", 1.0)
         rv = _body_float(data, "radius_value", 1.0)
         albedo = _body_float(data, "albedo", 0.2)
+        period_h = _body_float(data, "spin_period_h", 24.0)
+        phase_deg = _body_float(data, "spin_phase_deg", 0.0)
+        axis = np.asarray(data.get("spin_axis", [0.0, 0.0, 1.0]), dtype=float)
+        _finite([period_h, phase_deg])
+        if period_h < 0.0 or axis.shape != (3,) or not np.all(np.isfinite(axis)) \
+                or np.linalg.norm(axis) < 1e-15:
+            raise HttpError(400, "自转周期不得为负，自转轴必须为三个有限且非零的数值")
+        axis = axis / np.linalg.norm(axis)
+        atmosphere = data.get("atmosphere")
+        try:
+            atmosphere = normalize_atmosphere(atmosphere)
+        except ValueError as e:
+            raise HttpError(400, str(e))
         mu = _body_str(data, "mass_unit", "earth")
         ru = _body_str(data, "radius_unit", "earth")
         _finite([mv, rv, albedo])
@@ -711,7 +785,11 @@ def _body_draft(data: dict):
         radius = rv * R_EARTH_MEAN if ru == "earth" else rv * 1000.0
         rho = 3.0 * mass / (4.0 * np.pi * radius**3)
         candidate = Body(name, BODY, mass_kg=mass, radius_m=radius,
-                         albedo=albedo, rotation_period_s=24 * 3600.0)
+                         albedo=albedo, spin_axis=axis,
+                         spin_rate_rad_s=2*np.pi/(period_h*3600) if period_h else 0.0,
+                         spin_phase_rad=np.radians(phase_deg))
+        if atmosphere is not None:
+            candidate.extra["atmosphere"] = atmosphere
         nonstar_out = {"mean_density_kg_m3": rho, "mean_density_g_cm3": rho / 1000.0,
                        "surface_gravity_m_s2": G * mass / radius**2,
                        "escape_velocity_m_s": np.sqrt(2.0 * G * mass / radius)}
@@ -1060,6 +1138,12 @@ def api_get_sky(query):
         r_world = pos[idx[body]] if body is not None else np.zeros(3)
         t_s = WS.sim.t_s
         frame = normalize_astro_frame(SYSTEM.astro_frame)
+    return _sky_payload(r_world, t_s, body, mlim)
+
+
+def _sky_payload(r_world, t_s, body=None, mlim=8.0):
+    """Observer-centred real stars at an absolute world-space point."""
+    frame = normalize_astro_frame(SYSTEM.astro_frame)
     observer = world_to_icrs_pc(frame, r_world, t_s)
     year = julian_year(frame, t_s)
     sky = _sky_catalog().observe(observer, year, mlim)
@@ -1078,6 +1162,222 @@ def api_get_sky(query):
         "bv": [None if not np.isfinite(x) else float(x) for x in sky["bv"]],
         "sun_index": sky["sun_index"],
     }
+
+
+# ------------------------------------------------------- observation points -
+def api_list_observations():
+    return {"points": [dict(p) for p in SYSTEM.observation_points]}
+
+
+def _observation_or_404(name):
+    for p in SYSTEM.observation_points:
+        if p["name"] == name:
+            return p
+    raise HttpError(404, f"no observation point '{name}'")
+
+
+def api_save_observation(body):
+    if _evolution_active():
+        raise HttpError(409, "推演进行中,不能编辑观察点")
+    if body.get("confirm") is not True:
+        raise HttpError(400, "保存观察点需要明确确认")
+    try:
+        p = normalize_point(body)
+        validate_points([p], SYSTEM.bodies)
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    original = _body_str(body, "original_name", None)
+    points = list(SYSTEM.observation_points)
+    found = None
+    if original is not None:
+        for i, old in enumerate(points):
+            if old["name"] == original:
+                found = i
+                break
+        if found is None:
+            raise HttpError(404, f"no observation point '{original}'")
+    if any(q["name"] == p["name"] and q["name"] != original for q in points):
+        raise HttpError(400, f"观察点名称已存在: {p['name']}")
+    if found is None:
+        points.append(p)
+    else:
+        points[found] = p
+    SYSTEM.observation_points = points
+    world_mod.save_world(WS.snapshot_for_save(), _world_path(CURRENT_WORLD))
+    return {"ok": True, "point": p,
+            "points": [dict(q) for q in SYSTEM.observation_points]}
+
+
+def api_delete_observation(body):
+    if _evolution_active():
+        raise HttpError(409, "推演进行中,不能删除观察点")
+    if body.get("confirm") is not True:
+        raise HttpError(400, "删除观察点需要明确确认")
+    name = _body_str(body, "name", required=True)
+    points = [p for p in SYSTEM.observation_points if p["name"] != name]
+    if len(points) == len(SYSTEM.observation_points):
+        raise HttpError(404, f"no observation point '{name}'")
+    SYSTEM.observation_points = points
+    world_mod.save_world(WS.snapshot_for_save(), _world_path(CURRENT_WORLD))
+    return {"ok": True, "points": [dict(p) for p in points]}
+
+
+def _occluders(observer, target, distance, states, radii, host):
+    """Finite-sphere central occultation; excludes the host below our feet."""
+    direction = (target - observer) / distance
+    hits = []
+    for name, other in states.items():
+        if name == host:
+            continue
+        delta = np.asarray(other, dtype=float) - observer
+        along = float(np.dot(delta, direction))
+        if along <= 0.0 or along >= distance - radii.get(name, 0.0):
+            continue
+        impact = float(np.linalg.norm(delta - along * direction))
+        if impact < radii.get(name, 0.0):
+            hits.append(name)
+    return hits
+
+
+def api_get_observation(query):
+    name = (query.get("name") or [None])[0]
+    point = _observation_or_404(name)
+    snap = WS.state_at(None)                # no clock movement, no prediction
+    b = SYSTEM.bodies[point["body"]]
+    sb = dict(snap["bodies"][b.name], radius_m=b.radius_m)
+    frame = local_frame(sb, snap["spins"][b.name], point)
+    # A one-centimetre offset prevents self-intersection without becoming an
+    # invented altitude input. The named point itself remains only lat/lon.
+    obs = frame["surface_m"] + frame["up"] * 0.01
+    states = {n: np.asarray(v["p"], dtype=float) for n, v in snap["bodies"].items()}
+    radii = {n: (snap["stars"].get(n, {}).get("radius_m", SYSTEM.bodies[n].radius_m))
+             for n in states}
+    result, illumination, direct = [], {"total": 0.0}, {"total": 0.0}
+    atm = b.extra.get("atmosphere")
+    optics = SphericalAtmosphere(b.radius_m, atm) if atm is not None else None
+    east, north, up = frame["east"], frame["north"], frame["up"]
+    for other in SYSTEM.bodies.values():
+        if other.name == b.name:
+            continue
+        delta = states[other.name] - obs
+        distance = float(np.linalg.norm(delta))
+        if distance <= 0.0:
+            continue
+        direction = delta / distance
+        enu = np.array([np.dot(direction, east), np.dot(direction, north), np.dot(direction, up)])
+        occult = _occluders(obs, states[other.name], distance, states, radii, b.name)
+        radius = radii[other.name]
+        angular = math.asin(min(1.0, radius / distance)) if radius > 0 else 0.0
+        flux = None
+        if other.kind == STAR:
+            lum = snap["luminosity_w"][other.name]
+            flux = float(lum / (4*np.pi*distance**2))
+            illumination[other.name] = flux
+            illumination["total"] += flux
+            beam = max(0.0, float(np.dot(direction, up))) if not occult else 0.0
+            if optics is not None:
+                transmission = optics.transmittance(frame["up"] * (b.radius_m + 0.01), direction)
+                beam *= float(np.mean(transmission))
+            direct[other.name] = beam * flux
+            direct["total"] += beam * flux
+        angles = enu_angles(enu)
+        result.append({
+            "name": other.name, "kind": other.kind,
+            "position_m": states[other.name].tolist(),
+            "direction_world": direction.tolist(), "direction_enu": enu.tolist(),
+            "distance_m": distance, "angular_radius_rad": angular,
+            "above_horizon": bool(enu[2] >= 0.0), "occluded_by": occult,
+            "illumination_wm2": flux,
+            "teff_k": snap["stars"].get(other.name, {}).get("teff_k"),
+            "spectrum_rgb": spectrum_rgb(snap["stars"][other.name]["teff_k"])
+                if other.kind == STAR else [1.0, 1.0, 1.0],
+            **angles,
+        })
+    t_eq = equilibrium_temperature(illumination["total"], albedo=b.albedo,
+                                   regime="fast_rotator")
+    local = equilibrium_temperature(direct["total"], albedo=b.albedo,
+                                    regime="substellar")
+    greenhouse = (1.0 + 0.75*atm["infrared_optical_depth"]) ** 0.25 if atm else 1.0
+    sky = _sky_payload(obs, snap["t_days"]*DAY, b.name)
+    return {
+        "point": dict(point), "t_days": snap["t_days"],
+        "observer": {k: v.tolist() if isinstance(v, np.ndarray) else v
+                     for k, v in frame.items() if k != "point"},
+        "position_m": obs.tolist(), "bodies": result,
+        "atmosphere": atm, "illumination": illumination,
+        "surface_irradiance_wm2": direct,
+        "temperature": {"equilibrium_k": t_eq, "local_dayside_k": local,
+                        "reference_surface_k": atm["surface_temperature_k"] if atm else None,
+                        "estimated_surface_k": local * greenhouse},
+        "sky": sky,
+    }
+
+
+# ------------------------------------------------------- atmosphere cache ---
+_ATMOSPHERE_JOBS = {}
+_ATMOSPHERE_LOCK = threading.Lock()
+
+
+def _atmosphere_input(body_name):
+    b = SYSTEM.bodies.get(body_name)
+    if b is None or b.kind != BODY:
+        raise HttpError(404, f"no non-stellar body '{body_name}'")
+    atm = b.extra.get("atmosphere")
+    if atm is None:
+        raise HttpError(404, f"body '{body_name}' has no atmosphere")
+    return b, normalize_atmosphere(atm)
+
+
+def _atmosphere_json(model):
+    return {"ready": True, "format": model["format"], "version": model["version"],
+            "fingerprint": model["fingerprint"],
+            "mu": model["mu"].tolist(), "height_m": model["height_m"].tolist(),
+            "tau": model["tau"].tolist(), "sun_cos": model["sun_cos"].tolist(),
+            "view_cos": model["view_cos"].tolist(), "multiple": model["multiple"].tolist(),
+            "approximation": "RGB球壳；一阶完整相函数；2–4阶Monte-Carlo传输并对相对方位平均"}
+
+
+def api_atmosphere_start(body):
+    name = _body_str(body, "body", required=True)
+    b, atm = _atmosphere_input(name)
+    key = optics_key(b.radius_m, atm)
+    with _ATMOSPHERE_LOCK:
+        job = _ATMOSPHERE_JOBS.get(key)
+        if job is not None:
+            if job.get("error"):
+                return {"ready": False, "status": "error", "error": job["error"]}
+            if job.get("model") is not None:
+                return _atmosphere_json(job["model"])
+            return {"ready": False, "status": "running", "fingerprint": key}
+        job = {"model": None, "error": None}
+        _ATMOSPHERE_JOBS[key] = job
+    cache_dir = _world_path(CURRENT_WORLD).parent / "atmosphere"
+    def work():
+        try:
+            # Derived cache is isolated by the input hash. A world switch or
+            # edit can never make an old model authoritative for new inputs.
+            model = load_or_build_atmosphere(cache_dir, b.radius_m, atm)
+        except Exception as e:
+            job["error"] = str(e)
+            log.exception("atmospheric precomputation failed")
+        else:
+            job["model"] = model
+    threading.Thread(target=work, daemon=True, name=f"atmosphere-{key[:8]}").start()
+    return {"ready": False, "status": "running", "fingerprint": key}
+
+
+def api_atmosphere_status(query):
+    name = (query.get("body") or [None])[0]
+    b, atm = _atmosphere_input(name)
+    key = optics_key(b.radius_m, atm)
+    job = _ATMOSPHERE_JOBS.get(key)
+    if job is None:
+        return {"ready": False, "status": "not_started", "fingerprint": key}
+    if job.get("error"):
+        return {"ready": False, "status": "error", "error": job["error"]}
+    if job.get("model") is not None:
+        return _atmosphere_json(job["model"])
+    return {"ready": False, "status": "running", "fingerprint": key}
 
 
 # ---------------------------------------------------------------- router ----
@@ -1151,6 +1451,10 @@ def route_api(method: str, segs: list[str], query: dict, body: dict):
             return api_structure(name, body), 200
         if method == "POST" and len(tail) == 3 and tail[2] == "temperature":
             return api_temperature(name, body), 200
+        if method == "POST" and len(tail) == 3 and tail[2] == "edit":
+            return api_body_edit(body), 200
+        if method == "POST" and len(tail) == 3 and tail[2] == "preview":
+            return api_body_preview(body), 200
     if tail[:1] == ["star"]:
         if method == "GET" and tail == ["star", "status"]:
             return api_star_status(), 200
@@ -1198,6 +1502,20 @@ def route_api(method: str, segs: list[str], query: dict, body: dict):
         return api_save_astroframe(body), 200
     if method == "GET" and tail == ["sky"]:
         return api_get_sky(query), 200
+    if method == "GET" and tail == ["observations"]:
+        return api_list_observations(), 200
+    if method == "POST" and tail == ["observations"]:
+        return api_save_observation(body), 200
+    if method == "POST" and tail == ["observations", "delete"]:
+        return api_delete_observation(body), 200
+    if method == "GET" and tail == ["observation"]:
+        return api_get_observation(query), 200
+    if method == "POST" and tail == ["atmosphere"]:
+        return api_atmosphere_start(body), 200
+    if method == "GET" and tail == ["atmosphere", "defaults"]:
+        return {"atmosphere": default_atmosphere()}, 200
+    if method == "GET" and tail == ["atmosphere"]:
+        return api_atmosphere_status(query), 200
     raise HttpError(404, "not found")
 
 
@@ -1324,6 +1642,15 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
+    allow_reuse_address = False
+
+    def server_bind(self):
+        # Windows SO_REUSEADDR permits two live sockets on the same port, so
+        # an old and a new O₂xygen could nondeterministically answer requests.
+        # Exclusive address use makes a second launch fail immediately.
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def handle_error(self, request, client_address):
         # Browsers abort keep-alive connections all the time (tab close,

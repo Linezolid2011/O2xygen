@@ -46,3 +46,16 @@ def test_eof_during_prompt_stops_instead_of_trapping_terminal(monkeypatch):
     monkeypatch.setattr(builtins, "input", no_input)
     serve_with_interrupt_prompt(server)
     assert server.calls == 1
+
+
+def test_two_servers_cannot_share_one_live_port():
+    # Windows SO_REUSEADDR used to allow two LIVE listeners, not just reuse
+    # after close. This test prevents mixed-version HTTP responses.
+    import app
+    first = app.Server(("127.0.0.1", 0), app.Handler)
+    try:
+        with pytest.raises(OSError):
+            second = app.Server(("127.0.0.1", first.server_address[1]), app.Handler)
+            second.server_close()
+    finally:
+        first.server_close()

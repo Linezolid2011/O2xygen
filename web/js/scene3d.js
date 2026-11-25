@@ -55,8 +55,10 @@ export class OrbitScene {
     this.selected = null;
     this.hover = null;
     this.is2D = false;
+    this.pickEnabled = true;
 
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false,
+      logarithmicDepthBuffer: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x0a0c11, 1);
     this.renderer.autoClear = false;             // sky pass, then world pass
@@ -429,6 +431,7 @@ export class OrbitScene {
   }
 
   pick(e) {
+    if (this.pickEnabled === false) return null;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1,
                      -((e.clientY - rect.top) / rect.height) * 2 + 1);

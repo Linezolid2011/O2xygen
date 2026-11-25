@@ -531,6 +531,7 @@ class Workspace:
             states = self.sim.live_state()
             spins = self._spin_map(self.sim.t_s)
             out = System(self.system.name, origin=self.system.origin)
+            out.observation_points = [dict(p) for p in self.system.observation_points]
             # Rebase only the ledger clock.  Q(T), P, L and M are copied at
             # the SAME live epoch; adding P*T again would double-propagate it.
             out.wind = self.sim.wind.at(self.sim.t_s)

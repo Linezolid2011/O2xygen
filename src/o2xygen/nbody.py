@@ -60,6 +60,8 @@ def rv_to_elements(r_vec: np.ndarray, v_vec: np.ndarray, mu: float) -> Osculatin
     v2 = float(np.dot(v_vec, v_vec))
     h_vec = np.cross(r_vec, v_vec)
     h = np.linalg.norm(h_vec)
+    if h == 0.0 or not np.isfinite(h):
+        raise ValueError("zero or undefined orbital angular momentum")
     k_vec = np.array([0.0, 0.0, 1.0])
     n_vec = np.cross(k_vec, h_vec)
     n = np.linalg.norm(n_vec)

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/vendor/uPlot.min.css">
 <link rel="stylesheet" href="/css/app.css">
 <link rel="stylesheet" href="/css/body-builder.css">
+<link rel="stylesheet" href="/css/live.css">
 <script type="importmap">
 { "imports": { "three": "/vendor/three.module.js" } }
 </script>
@@ -27,6 +28,7 @@
     <div id="mode-toggle" class="mode-switch" title="切换模式会取消正在进行的推演">
       <button class="pill" data-app-mode="edit">编辑模式</button>
       <button class="pill active" data-app-mode="view">查看模式</button>
+      <button class="pill" data-app-mode="live">实况模式</button>
     </div>
     <div class="crumb">
       <span class="crumb-item">世界</span>
@@ -49,7 +51,7 @@
   <div id="main">
     <aside id="sidebar">
       <div class="catalog-head">
-        <span>天体目录</span><span class="catalog-count" id="catalog-count">0</span>
+        <span id="catalog-head-title">天体目录</span><span class="catalog-count" id="catalog-count">0</span>
       </div>
       <div class="catalog-search">
         <input type="text" id="catalog-filter" placeholder="搜索天体…  ">

@@ -1,0 +1,514 @@
+/* Live observation mode. Reuses the workshop palette and panel primitives. */
+.mode-live #body-labels,
+.mode-live #axis-gizmo,
+.mode-live #view-toggle,
+.mode-live #btn-grid { display: none; }
+.live-sky-hud { position: absolute; inset: 0; pointer-events: none; }
+.live-sky-hud[hidden] { display: none; }
+.live-sky-title { position: absolute; left: 16px; top: 14px; padding: 7px 11px;
+  border: 1px solid rgba(255,255,255,.15); border-radius: 8px;
+  color: #e4e8f2; background: rgba(10,14,22,.65); backdrop-filter: blur(6px);
+  font-size: 12px; letter-spacing: .3px; }
+.live-sky-orientation { position: absolute; right: 16px; bottom: 14px;
+  color: #d4dbeb; background: rgba(10,14,22,.65); padding: 6px 10px;
+  border-radius: 7px; font: 11px var(--mono); }
+.mode-live #nonstar-editor { display: none; }
+.mode-live #panel {
+  display: flex;
+}
+
+/* Observation-point catalog */
+#catalog li.live-obs-item {
+  display: block;
+  margin: 2px 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#catalog li.live-obs-item .live-obs-select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  outline: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font);
+}
+
+#catalog li.live-obs-item .live-obs-select:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent-dim);
+}
+
+.live-obs-top {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.live-obs-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-obs-body {
+  flex: none;
+  max-width: 42%;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#catalog li.live-obs-item.selected .live-obs-body {
+  color: var(--accent-dim);
+}
+
+.live-obs-coords {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .1px;
+  white-space: nowrap;
+}
+
+#catalog li.live-obs-item.selected .live-obs-coords {
+  color: var(--text-dim);
+}
+
+#catalog li.live-catalog-empty,
+#catalog li.live-catalog-error {
+  display: block;
+  padding: 12px 8px;
+  color: var(--text-faint);
+  cursor: default;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+  white-space: normal;
+}
+
+#catalog li.live-catalog-empty:hover,
+#catalog li.live-catalog-error:hover {
+  color: inherit;
+  background: transparent;
+}
+
+#catalog li.live-catalog-error {
+  text-align: left;
+}
+
+/* Right-hand live panel */
+.live-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--text);
+  background: var(--bg-panel);
+  scrollbar-gutter: stable;
+}
+
+.live-panel[hidden],
+.live-editor-mask[hidden] {
+  display: none !important;
+}
+
+.live-head {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px 10px;
+}
+
+.live-title-box {
+  min-width: 0;
+}
+
+.live-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.live-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-title-row .kind-chip {
+  flex: none;
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.live-subtitle {
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-head .icon-btn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+}
+
+.live-head .icon-btn:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.live-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  padding: 0 16px 11px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.live-actions .btn {
+  flex: 1;
+  min-width: 0;
+  padding-inline: 8px;
+  white-space: nowrap;
+}
+
+.live-status,
+.live-error {
+  flex: none;
+  margin: 10px 16px 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.live-status {
+  padding: 7px 9px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+}
+
+.live-content {
+  flex: none;
+  min-width: 0;
+  padding: 13px 16px 20px;
+}
+
+.live-section {
+  margin-bottom: 18px;
+}
+
+.live-section:last-child {
+  margin-bottom: 0;
+}
+
+.live-section .sec-title {
+  margin-bottom: 7px;
+}
+
+.live-section .kv {
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.live-section .kv .k {
+  flex: none;
+}
+
+.live-section .kv .v {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.live-subsection-title {
+  margin: 5px 0 6px;
+  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.live-illumination-surface {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.live-empty {
+  padding: 48px 12px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.8;
+  text-align: center;
+}
+
+.live-empty-mark {
+  margin-bottom: 9px;
+  color: var(--accent-dim);
+  font-size: 30px;
+  line-height: 1;
+}
+
+/* Local horizontal coordinates */
+.live-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.live-body-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 11px;
+}
+
+.live-body-table th {
+  padding: 5px 4px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.live-body-table td {
+  padding: 7px 4px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border-soft);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.live-body-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.live-body-table th:first-child,
+.live-body-table td:first-child {
+  width: 35%;
+  padding-left: 0;
+}
+
+.live-body-table th:nth-child(2),
+.live-body-table td:nth-child(2) {
+  width: 18%;
+}
+
+.live-body-table th:nth-child(3),
+.live-body-table td:nth-child(3) {
+  width: 18%;
+}
+
+.live-body-table th:last-child,
+.live-body-table td:last-child {
+  width: 29%;
+  padding-right: 0;
+}
+
+.live-body-table th.live-number,
+.live-body-table .live-number {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.live-body-table th:nth-child(2),
+.live-body-table th:nth-child(3) {
+  text-align: right;
+}
+
+.live-body-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.live-body-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-body-name small,
+.live-body-meta {
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.live-body-meta {
+  margin-top: 3px;
+  font-family: var(--mono);
+}
+
+.live-body-table tr.below-horizon td {
+  opacity: .55;
+}
+
+.live-visibility {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.live-visibility.clear {
+  color: var(--green);
+}
+
+.live-visibility.blocked {
+  color: var(--accent);
+}
+
+.live-visibility.muted {
+  color: var(--text-faint);
+}
+
+/* Optional authoritative observer basis, collapsed to keep the panel compact. */
+.live-observer-details {
+  padding: 10px 11px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.live-observer-details summary {
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  outline: none;
+}
+
+.live-observer-details summary:focus-visible {
+  color: var(--accent);
+}
+
+.live-observer-box {
+  margin-top: 8px;
+}
+
+.live-observer-box .kv {
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 10px;
+}
+
+.live-observer-box .kv .v {
+  max-width: 65%;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+/* Observation-point editor */
+.live-editor-mask {
+  z-index: 80;
+}
+
+.live-editor {
+  width: 480px;
+}
+
+.live-editor-form > .live-editor-field {
+  margin-bottom: 12px;
+}
+
+.live-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.live-editor-field input,
+.live-editor-field select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.live-editor-field input {
+  font-family: var(--mono);
+}
+
+.live-editor-field input[type="text"] {
+  font-family: var(--font);
+}
+
+.live-editor-coordinates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.live-editor-form .modal-note {
+  margin-top: 12px;
+}
+
+.live-editor-foot {
+  flex-wrap: wrap;
+  margin-top: 17px;
+}
+
+.live-editor-status,
+.live-editor-error {
+  min-width: 0;
+  margin-right: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.live-editor-status {
+  color: var(--text-dim);
+}
+
+.live-editor-status:empty,
+.live-editor-error:empty {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .live-editor-coordinates {
+    grid-template-columns: 1fr;
+  }
+
+  .live-editor-coordinates .live-editor-field + .live-editor-field {
+    margin-top: 2px;
+  }
+}

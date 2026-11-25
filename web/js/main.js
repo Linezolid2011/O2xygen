@@ -5,6 +5,9 @@ import { buildCatalog } from "./catalog.js";
 import { initPanels, showBody, onTimeChanged, setPanelMode } from "./panels.js";
 import { initTimeline } from "./timeline.js";
 import { initBodyBuilder } from "./add_body.js";
+import { initLiveMode } from "./live.js";
+import { SurfaceSky } from "./surface_sky.js";
+import { initBodyEditor } from "./body_editor.js";
 
 const $ = (s) => document.querySelector(s);
 
@@ -84,6 +87,14 @@ async function boot() {
     onSelect: (name) => select(name, true),
   });
   window.__scene = scene;      // debug/test hook
+  const surface = new SurfaceSky(scene.renderer, $("#gl"), system);
+  window.__surface = surface;  // observer-local renderer, never a physics clock
+  let live = null;
+  let atmosphereSerial = 0;
+  const bodyEditor = initBodyEditor({
+    system,
+    onCommitted: () => { $("#grid-status").textContent = "✓ 天体参数已保存"; },
+  });
 
   const es = new EventSource("/api/stream");
   window.__stream = es;        // debug/test hook
@@ -133,6 +144,7 @@ async function boot() {
   const catalog = buildCatalog(system, (name) => select(name, true));
 
   async function select(name, fromUser) {
+    if (appMode === "live") { await live?.select(name); return; }
     selected = name;
     catalog.select(name);
     scene.select(name);
@@ -142,6 +154,7 @@ async function boot() {
       openStarEditor(name);
     } else {
       closeStarEditor();
+      if (appMode === "edit") bodyEditor.open(name);
     }
     await showBody(name);
   }
@@ -171,9 +184,13 @@ async function boot() {
       scene.set2D(pill.dataset.mode === "2d");
     });
   });
-  $("#btn-focus").addEventListener("click", () => scene.focusSelected());
+  $("#btn-focus").addEventListener("click", () => {
+    if (appMode === "live") surface.home(); else scene.focusSelected();
+  });
   $("#btn-grid").addEventListener("click", () => scene.toggleGrid());
-  $("#btn-stars").addEventListener("click", () => scene.toggleStars());
+  $("#btn-stars").addEventListener("click", () => {
+    if (appMode === "live") surface.toggleStars(); else scene.toggleStars();
+  });
 
   // render loop: draw exactly what the server sent - no clock, no physics.
   // A 250 ms ticker drives the clock label and time-followed panels (their
@@ -183,8 +200,12 @@ async function boot() {
     onTimeChanged();
   }, 250);
   (function frame() {
-    scene.update(currentDays);
-    scene.render();
+    if (appMode === "live") {
+      surface.render();       // latest authoritative observation; no time advance
+    } else {
+      scene.update(currentDays);
+      scene.render();
+    }
     requestAnimationFrame(frame);
   })();
 
@@ -220,8 +241,9 @@ async function boot() {
     align.disabled = on || appMode !== "edit";
     align.classList.toggle("accent", appMode === "edit");
     const add = $("#btn-add-body");
-    add.disabled = on || appMode !== "edit";
-    add.classList.toggle("accent", appMode === "edit");
+    const canAdd = appMode === "edit" || appMode === "live";
+    add.disabled = on || !canAdd;
+    add.classList.toggle("accent", canAdd);
   }
 
   evBtn.addEventListener("click", async () => {
@@ -377,13 +399,21 @@ async function boot() {
       if (st.state === "running" || st.state === "paused") {
         await api.evolveCancel();
       }
+      if (!["view", "edit", "live"].includes(next)) return;
       clearInterval(evTimer);
       evolving = false;
       timeline.setIdle();
-      lockWorldUI(false);
+      if (appMode === "live") {
+        atmosphereSerial++;
+        live?.exit();
+        surface.exit();
+      }
       appMode = next;
+      scene.controls.enabled = next !== "live";
+      scene.pickEnabled = next !== "live";
       document.body.classList.toggle("mode-view", next === "view");
       document.body.classList.toggle("mode-edit", next === "edit");
+      document.body.classList.toggle("mode-live", next === "live");
       modeButtons.forEach((b) => b.classList.toggle("active", b.dataset.appMode === next));
       $("#btn-astro-frame").hidden = next !== "edit";
       afModal.hidden = true;
@@ -391,9 +421,18 @@ async function boot() {
       $("#align-modal").hidden = true;
       bodyBuilder.close();
       closeStarEditor();
+      bodyEditor.close();
       setPanelMode(next);
-      setEvolveButton("idle");       // edit mode: disabled by appMode
-      lockWorldUI(false);            // align is orange ONLY in edit mode
+      setEvolveButton("idle");       // only view mode can evolve
+      if (next === "live") {
+        surface.enter();
+        await live?.enter();
+        $("#btn-focus").title = "回到观察点天顶 (Home)";
+      } else {
+        $("#btn-focus").title = "聚焦选中天体";
+        if (selected) await select(selected, false);
+      }
+      lockWorldUI(false);            // add point is enabled ONLY in live
     } catch (e) {
       alert(`切换模式失败:${e.message}`);
     } finally {
@@ -652,6 +691,40 @@ async function boot() {
   $("#btn-add-body").addEventListener("click", () => {
     if (appMode === "edit" && !evolving) bodyBuilder.open();
   });
+
+  async function loadLiveAtmosphere(body, pointName, serial) {
+    try {
+      let model = await api.atmosphereStart(body);
+      while (model.status === "running") {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        if (serial !== atmosphereSerial || appMode !== "live" || live?.selectedName !== pointName) return;
+        model = await api.atmosphereStatus(body);
+      }
+      if (serial !== atmosphereSerial || appMode !== "live" || live?.selectedName !== pointName) return;
+      if (!model.ready) throw new Error(model.error || "大气预计算未完成");
+      surface.setAtmosphere(model);
+      surface.render();
+    } catch (e) {
+      if (serial === atmosphereSerial && appMode === "live") {
+        surface.title.textContent = `${pointName} · 大气不可用: ${e.message}`;
+      }
+    }
+  }
+  live = initLiveMode({
+    system,
+    onEdit: (point) => live.openEditor(point),
+    onSelect: async (pointName, data) => {
+      const serial = ++atmosphereSerial;
+      surface.setData(data);
+      surface.render();
+      if (data.atmosphere) await loadLiveAtmosphere(data.point.body, pointName, serial);
+    },
+  });
+  window.__live = live;
+  // The server remains the only physics clock. These are read-only observer
+  // queries while another tab finishes stellar-grid settlement, never local
+  // evolution or extrapolation.
+  setInterval(() => { if (appMode === "live") void live.refresh(); }, 3000);
 
   // initial selection: the moon he had selected in the screenshots
   await select(system.bodies.some((b) => b.name === "Αύρα") ? "Αύρα" : system.bodies[0].name);
