@@ -56,6 +56,25 @@ def test_equatorial_basis_and_phase_change_surface_direction():
     assert enu_angles([0,0,-1])["altitude_deg"] == -90.0
 
 
+def test_tilted_axis_has_orthogonal_equatorial_meridian():
+    axis=np.array([0.2,-0.3,0.9327379053]);axis/=np.linalg.norm(axis)
+    phase=0.73
+    ref=np.array([1.0,0.0,0.0])-axis*axis[0];ref/=np.linalg.norm(ref)
+    meridian=(ref*np.cos(phase)+np.cross(axis,ref)*np.sin(phase)
+              +axis*np.dot(axis,ref)*(1-np.cos(phase)))
+    vertical=np.cross(axis,meridian)
+    target=np.array([0.4,-0.7,0.3]);target/=np.linalg.norm(target)
+    lat=np.degrees(np.arcsin(np.dot(target,axis)))
+    lon=np.degrees(np.arctan2(np.dot(target,vertical),np.dot(target,meridian)))
+    f=local_frame({"p":[0.,0.,0.],"radius_m":1.0},
+                  {"axis":axis,"phase_rad":phase},
+                  {"name":"tilt","body":"P","latitude_deg":lat,"longitude_deg":lon})
+    np.testing.assert_allclose(f["up"],target,atol=1e-12)
+    np.testing.assert_allclose(np.dot(f["up"],axis),np.sin(np.radians(lat)),atol=1e-12)
+    basis=np.array([f["east"],f["north"],f["up"]])
+    np.testing.assert_allclose(basis@basis.T,np.eye(3),atol=1e-12)
+
+
 def _observer_world():
     s=System("observer")
     # A star in the local zenith direction of a northern observation point.

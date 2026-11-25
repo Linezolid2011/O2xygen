@@ -3,7 +3,8 @@
 Only (name, body, latitude, longitude) are persisted.  The observer's world
 position and the local basis are derived from the authoritative body state and
 its spin phase.  Longitude increases eastward; the zero meridian is the body's
-+X material meridian at zero phase, and its north pole is the spin axis.
++X material direction projected onto its equatorial plane at zero phase, and
+its north pole is the spin axis. The projection is essential for tilted axes.
 """
 from __future__ import annotations
 
@@ -89,8 +90,16 @@ def local_frame(body: dict, spin: dict, point: dict) -> dict:
     if not math.isfinite(phase):
         raise ValueError("spin phase must be finite")
     lat, lon = math.radians(p["latitude_deg"]), math.radians(p["longitude_deg"])
-    meridian = _rotate_about_axis([1.0, 0.0, 0.0], axis, phase)
-    prime_vertical = _rotate_about_axis([0.0, 1.0, 0.0], axis, phase)
+    # A tilted spin axis is generally NOT orthogonal to body +X/+Y. Using
+    # those raw axes produces non-orthogonal longitudes and a wrong zenith.
+    # Project +X onto the equatorial plane, then construct a true right-handed
+    # equatorial basis. If +X is the pole, +Y is the well-defined fallback.
+    reference = np.array([1.0, 0.0, 0.0]) - axis * axis[0]
+    if np.linalg.norm(reference) < 1e-12:
+        reference = np.array([0.0, 1.0, 0.0]) - axis * axis[1]
+    reference = _unit(reference)
+    meridian = _rotate_about_axis(reference, axis, phase)
+    prime_vertical = np.cross(axis, meridian)
     local = (math.cos(lat) * (math.cos(lon) * meridian
                               + math.sin(lon) * prime_vertical)
              + math.sin(lat) * axis)
