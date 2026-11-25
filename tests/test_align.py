@@ -105,13 +105,13 @@ def test_confirmed_alignment_saves_only_translated_state(tmp_path, monkeypatch):
     with pytest.raises(app.HttpError) as exc:
         app.api_world_align({})
     assert exc.value.status == 400
-    assert not (tmp_path / "对齐.oxygen").exists()
+    assert not (app._world_path("对齐")).exists()
 
     got = app.api_world_align({"confirm": True})
     assert got["ok"] is True
     np.testing.assert_allclose(got["translation_m"], -bcm0,
                                rtol=0, atol=1e-3)
-    saved = world_mod.load_world(tmp_path / "对齐.oxygen")
+    saved = world_mod.load_world(app._world_path("对齐"))
     names = list(saved.bodies)
     masses = np.array([saved.bodies[n].mass_kg for n in names])
     positions = np.array([saved.bodies[n].pos0 for n in names])

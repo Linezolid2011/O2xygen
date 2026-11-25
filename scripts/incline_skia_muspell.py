@@ -30,7 +30,7 @@ INCLINATION = np.radians(2.0)
 
 def main(apply=False):
     mist, wd, cool = grids()
-    live_path = ROOT / ".data" / "worlds" / "白玫瑰.oxygen"
+    live_path = ROOT / "data" / "worlds" / "白玫瑰" / "白玫瑰.oxygen"
     ws = Workspace(world_mod.load_world(live_path), grid_getter=lambda: mist,
                    wd_grid_getter=lambda: wd, cool_grid_getter=lambda: cool)
     ws.state_at(None)

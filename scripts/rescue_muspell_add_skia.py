@@ -64,7 +64,7 @@ def plane_basis(r, v):
 
 def main(apply=False):
     mist, wd, cool = grids()
-    live_path = ROOT / ".data" / "worlds" / "白玫瑰.oxygen"
+    live_path = ROOT / "data" / "worlds" / "白玫瑰" / "白玫瑰.oxygen"
     system = world_mod.load_world(live_path)
     ws = Workspace(system, grid_getter=lambda: mist,
                    wd_grid_getter=lambda: wd, cool_grid_getter=lambda: cool)

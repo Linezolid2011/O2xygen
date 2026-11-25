@@ -55,9 +55,9 @@ from o2xygen.astroframe import (normalize_astro_frame, position_radec,
 
 WEB_DIR = ROOT / "web"
 DOCS_DIR = ROOT / "docs"
-# worlds are user content, kept with the app's other mutable data under
-# .data/ (gitignored); overridable for tests/deployments
-WORLDS_DIR = Path(os.environ.get("O2YGEN_WORLDS_DIR", ROOT / ".data" / "worlds"))
+# User worlds are separate from reference data (.data).  Each world owns a
+# directory so expensive derived resources can later live beside its save.
+WORLDS_DIR = Path(os.environ.get("O2YGEN_WORLDS_DIR", ROOT / "data" / "worlds"))
 
 VERSION = (DOCS_DIR / "version.txt").read_text(encoding="utf-8").strip()
 
@@ -169,16 +169,28 @@ def _check_world_name(name: str) -> str:
     return name
 
 
+def _world_path(name: str) -> Path:
+    """The sole save path for a world: data/worlds/name/name.oxygen."""
+    name = _check_world_name(name)
+    return _worlds_dir() / name / f"{name}.oxygen"
+
+
+def _world_names() -> list[str]:
+    """World directories with an exactly matching .oxygen file inside."""
+    return sorted(p.name for p in _worlds_dir().iterdir()
+                  if p.is_dir() and (p / f"{p.name}.oxygen").is_file())
+
+
 def _bootstrap_worlds():
     """First run: materialise the built-in 白玫瑰 world as a real file."""
-    if not list(_worlds_dir().glob("*.oxygen")):
+    if not _world_names():
         from preset import build_preset
-        world_mod.save_world(build_preset(), _worlds_dir() / "白玫瑰")
+        world_mod.save_world(build_preset(), _world_path("白玫瑰"))
 
 
 def _load_system(name: str) -> System:
-    path = _worlds_dir() / _check_world_name(name)
-    if not path.with_suffix(".oxygen").exists():
+    path = _world_path(name)
+    if not path.exists():
         raise HttpError(404, f"no world '{name}'")
     return world_mod.load_world(path)
 
@@ -586,7 +598,7 @@ def api_star_edit(body):
         # baseline: clear old wind, set Q=P=0 by a uniform translation/boost,
         # and discard checkpoints containing the old mass and coordinates.
         WS.sim.reset_conservation_epoch(recenter=True)
-    world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
+    world_mod.save_world(WS.snapshot_for_save(), _world_path(CURRENT_WORLD))
     return {"ok": True, "body": body_json(b)}
 
 
@@ -839,7 +851,7 @@ def api_add_body(body):
         WS.sim.wind.clear(float(WS.sim.t_s))
         WS.sim._cp_times = [float(WS.sim.t_s)]
         WS.sim._cp_snaps = [WS.sim._snapshot()]
-    world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
+    world_mod.save_world(WS.snapshot_for_save(), _world_path(CURRENT_WORLD))
     _rebuild(_load_system(CURRENT_WORLD), CURRENT_WORLD)
     return {"ok": True, "name": candidate.name,
             "body": body_json(SYSTEM.bodies[candidate.name])}
@@ -853,7 +865,7 @@ def api_evolve_start(body):
     speed_days_per_s = _body_float(body, "speed_days_per_s", required=True)
     if duration_days <= 0 or speed_days_per_s <= 0:
         raise HttpError(400, "推演时长与速度必须为正")
-    job = EvolutionJob(WS, _worlds_dir() / CURRENT_WORLD,
+    job = EvolutionJob(WS, _world_path(CURRENT_WORLD),
                        duration_days, speed_days_per_s)
     _EVOLUTION["job"] = job
     job.start()
@@ -949,8 +961,7 @@ def _rss_mb() -> float:
 
 # ------------------------------------------------------------- worlds -------
 def api_list_worlds():
-    files = sorted(p.stem for p in _worlds_dir().glob("*.oxygen"))
-    return {"worlds": files, "current": CURRENT_WORLD}
+    return {"worlds": _world_names(), "current": CURRENT_WORLD}
 
 
 def api_world_load(body):
@@ -968,7 +979,7 @@ def api_world_save(body):
     name = _check_world_name(raw) if raw.strip() else CURRENT_WORLD
     # 另存为 = 备份当前物理状态:pos0/vel0 取实时状态,恒星 age0 相应推进,
     # 使读回的世界与新 epoch 自洽(与推演自动存档同一语义)
-    path = world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / name)
+    path = world_mod.save_world(WS.snapshot_for_save(), _world_path(name))
     return {"ok": True, "world": path.stem}
 
 
@@ -985,7 +996,7 @@ def api_world_align(body):
         raise HttpError(400, "对齐操作需要明确确认")
     with WS.lock:
         shift, before, after = WS.sim.align_barycenter_to_origin()
-    world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
+    world_mod.save_world(WS.snapshot_for_save(), _world_path(CURRENT_WORLD))
     return {"ok": True, "world": CURRENT_WORLD,
             "translation_m": [float(x) for x in shift],
             "barycenter_before_m": [float(x) for x in before],
@@ -1011,7 +1022,7 @@ def api_save_astroframe(body):
     WS.system.astro_frame = f
     # metadata edits are persisted with the same epoch-consistent snapshot
     # semantics as 另存为/autosave; this also advances epoch_jd_tt correctly
-    world_mod.save_world(WS.snapshot_for_save(), _worlds_dir() / CURRENT_WORLD)
+    world_mod.save_world(WS.snapshot_for_save(), _world_path(CURRENT_WORLD))
     return api_get_astroframe()
 
 

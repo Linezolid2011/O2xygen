@@ -58,7 +58,7 @@ def main():
         ws.sim._cp_snaps = [ws.sim._snapshot()]
 
     path = app.world_mod.save_world(ws.snapshot_for_save(),
-                                    app._worlds_dir() / app.CURRENT_WORLD)
+                                    app._world_path(app.CURRENT_WORLD))
     peri = TARGET_A_AU * (1.0 - new.e)
     rl_v = peri * eggleton(mv / mw)
     rl_w = peri * eggleton(mw / mv)

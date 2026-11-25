@@ -349,6 +349,20 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 包含模式切换、编辑器取消/保存/重载、年龄驱动生命周期、MIST III
   锚点与 WDCool 质量分派回归;91 项测试通过。
 
+## [0.3.3] - 2026-11-25
+
+### 世界存档目录与资料分离(ADR-0037,用户裁定)
+
+- 世界存档由 `.data/worlds/[worldname].oxygen` 改为
+  `data/worlds/[worldname]/[worldname.oxygen]`;MIST/WDCool/Hipparcos 等
+  参考资料仍留 `.data`,用户世界独立到 `data`。
+- 每个世界拥有独立目录,唯一真源仍为该目录中的同名 `.oxygen`;以后可在
+  同目录保存由该档派生的高成本缓存,不必每次从头生成。
+- 新增统一 `_world_path`,覆盖首启、世界列表、读档、另存为、恒星编辑、
+  对齐、添加天体与推演自动存档;`save_world` 自动创建父目录。
+- 提供 `scripts/migrate_world_layout.py --apply`:备份、移动并 SHA-256
+  校验旧档,拒绝覆盖不同目标文件;新增目录布局回归。
+
 ## [0.3.2] - 2026-11-24
 
 ### 正式 Release
@@ -740,6 +754,7 @@ WebUI 初版与 26 项标定测试,此处不重复罗列)。
 - 回扫成本有安全阀(单次 ≤~2000 次积分调用);窗口集合变化 >10% 时缓存
   自动失效。全程零客户端物理(头弧是权威数据回放,非积分)。
 
+[0.3.3]: https://github.com/Linezolid2011/O2xygen/tree/0.3.3
 [0.3.2]: https://github.com/Linezolid2011/O2xygen/tree/0.3.2
 [0.3.2-rc8]: https://github.com/Linezolid2011/O2xygen/tree/0.3.2-rc8
 [0.3.2-rc7]: https://github.com/Linezolid2011/O2xygen/tree/0.3.2-rc7

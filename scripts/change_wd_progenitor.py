@@ -61,7 +61,7 @@ def main():
         ws.sim.reset_conservation_epoch(recenter=True)
 
     path = app.world_mod.save_world(ws.snapshot_for_save(),
-                                    app._worlds_dir() / app.CURRENT_WORLD)
+                                    app._world_path(app.CURRENT_WORLD))
     print(f"WD mass: {mw / M_SUN:.9f} -> {mw_new / M_SUN:.9f} M_sun")
     print(f"relative speed scale: {scale:.12f}")
     print(f"a: {old_el.a_m / AU:.12f} -> {new_el.a_m / AU:.12f} AU")

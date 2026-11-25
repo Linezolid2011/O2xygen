@@ -44,7 +44,7 @@ def test_preview_is_non_destructive_and_reports_lifecycle():
     app._load_grid()
     before = app.SYSTEM.bodies["Vesper"].extra["age0_gyr"]
     t0 = app.WS.sim.t_s
-    path = app._worlds_dir() / f"{app.CURRENT_WORLD}.oxygen"
+    path = app._world_path(app.CURRENT_WORLD)
     mtime = path.stat().st_mtime
     got = app.api_star_preview({"name": "Vesper", "age0_gyr": 100.0})
     assert got["model"] in ("mist3_wd", "wdcool")

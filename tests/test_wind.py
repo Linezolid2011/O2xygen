@@ -285,6 +285,6 @@ def test_star_editor_resets_wind_and_preserves_relative_state(tmp_path,
                                0.0, rtol=0, atol=1e28)
     np.testing.assert_allclose(snap["conservation"]["bodies"]["momentum_kg_m_s"],
                                0.0, rtol=0, atol=1e20)
-    saved = world_mod.load_world(tmp_path / "编辑测试.oxygen")
+    saved = world_mod.load_world(app._world_path("编辑测试"))
     assert saved.wind.mass_kg == 0.0
     assert np.all(saved.wind.momentum_kg_m_s == 0.0)

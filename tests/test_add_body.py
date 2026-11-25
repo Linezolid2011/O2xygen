@@ -34,7 +34,7 @@ def test_preview_is_non_destructive_and_computes_direct_state(tmp_path,
     monkeypatch.setattr(app, "SYSTEM", world)
     monkeypatch.setattr(app, "WS", ws)
     monkeypatch.setattr(app, "WORLDS_DIR", tmp_path)
-    mtime = tmp_path / "白玫瑰.oxygen"
+    mtime = app._world_path("白玫瑰")
     world_mod.save_world(world, mtime)
     before = world_mod.system_to_dict(world)
     got = app.api_add_body_preview(_direct())
@@ -193,7 +193,7 @@ def test_confirm_preserves_exact_draft_state_and_reloads_save(tmp_path,
     preview = app.api_add_body_preview(_direct())
     got = app.api_add_body(_direct(confirm=True))
     assert got["ok"] is True
-    saved = world_mod.load_world(tmp_path / "白玫瑰.oxygen")
+    saved = world_mod.load_world(app._world_path("白玫瑰"))
     assert len(saved.bodies) == len(before_states) + 1
     added = saved.bodies["Probe"]
     np.testing.assert_allclose(added.pos0, preview["p"], rtol=0, atol=1e-3)

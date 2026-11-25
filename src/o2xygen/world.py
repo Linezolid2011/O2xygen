@@ -124,6 +124,7 @@ def save_world(system: System, path: str | Path) -> Path:
     path = Path(path)
     if path.suffix != ".oxygen":
         path = path.with_suffix(".oxygen")
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(system_to_dict(system), ensure_ascii=False,
                                indent=2), encoding="utf-8")
     return path

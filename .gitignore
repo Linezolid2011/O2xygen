@@ -21,6 +21,7 @@ venv/
 .data/worlds/
 .data/candidates/
 .data/backups/
+/data/worlds/
 
 # ---- Hipparcos 原始/转换星表:仅供本地验证与后续导入 ----
 .data/hip2000/

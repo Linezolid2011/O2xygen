@@ -32,8 +32,8 @@ MIST 运行时求值,不另存副本(ADR-0022/0026)。schema v2 另存权威逃�
 
 ## 功能
 
-- **多世界**:`.data/worlds/*.oxygen` 存档,UI 头部下拉切换、另存为,
-  首启自动物化内置白玫瑰。
+- **多世界**:`data/worlds/[worldname]/[worldname.oxygen]` 存档,UI 头部
+  下拉切换、另存为,首启自动物化内置白玫瑰;每个世界有独立资源目录。
 - **实时积分 + 推演**:rebound IAS15(默认)/ WHFast;推演债额 pacing
   (实测速率与配置值分毫不差)、块级步数预算、外部时钟移动检测、
   温度类查询非破坏化(副本采样,永不拨动活时钟)。
@@ -84,7 +84,7 @@ python -m venv .venv
 `http.server`,标量求根/求极值是 `src/o2xygen/optimize.py` 的手写实现;
 测试用 pytest(仅开发期)、UI 烟测用 playwright(仅开发期)。
 
-测试(119 项,含公开参照标定、风损封闭守恒、固定原点与放置/关闭回归):
+测试(122 项,含公开参照标定、风损封闭守恒、固定原点与放置/关闭回归):
 
 ```bash
 .venv/Scripts/python -m pytest
@@ -96,8 +96,11 @@ python -m venv .venv
 压缩包位于 `.data/MIST-compact/`(每卷 ≤64 MB,避开 GitHub 单文件
 100 MB 限制;原始包约 107 MB × 2)。首次启动时程序自动拼接分卷并解压到
 `.data/MIST/`(纯 Python tarfile,解压产物与解析缓存被 gitignore,
-压缩卷保留不删)。世界存档(`*.oxygen`)仍是用户内容,默认存于
-`.data/worlds/`(环境变量 `O2YGEN_WORLDS_DIR` 可覆盖),不进仓库。
+压缩卷保留不删)。MIST、WDCool、Hipparcos 等参考资料仍在 `.data`。
+世界存档(`*.oxygen`)是独立用户内容,默认存于
+`data/worlds/[worldname]/[worldname.oxygen]`(环境变量 `O2YGEN_WORLDS_DIR`
+可覆盖),不进仓库;每个世界目录也可存放以后由该档派生的高成本缓存。
+旧平铺存档可用 `scripts/migrate_world_layout.py --apply` 备份并迁移。
 
 Hipparcos 验证数据位于 `.data/hip2000/`(不入库):`hip_main.dat` 为
 J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
@@ -114,7 +117,7 @@ J1991.25 原始观测历元,生成的 `hipparcos_*.js` 为 J2000;可用
 src/o2xygen/   物理内核(纯 Python,可独立使用;optimize.py 为手写 Brent/黄金分割)
 server/        标准库 HTTP 服务(Workspace = 活积分器 + 恒星演化耦合)
 web/           原生 ES modules 前端(无构建)
-tests/         119 项标定、守恒与交互验收测试
+tests/         122 项标定、守恒与交互验收测试
 docs/          CHANGELOG / ADR 档案(decisions.md)/ 重建笔记(RECON.md)
 shots/         无头 Chrome 截图存档(UI 迭代留痕)
 scripts/       shot.py(截图)/ dbg_scene.py(场景调试)/ repair_world.py(存档修复)
