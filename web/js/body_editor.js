@@ -1,5 +1,6 @@
 // Non-stellar draft editor: persistent spin, longitude phase and optical inputs.
 import { api } from "./api.js";
+import { DEFAULT_BODY_RGB } from "./color.js";
 
 const FIELDS = [
   ["surface_pressure_pa","参考表面气压 (Pa)"],["surface_temperature_k","参考表面温度 (K)"],
@@ -20,10 +21,23 @@ export function initBodyEditor({system,onCommitted}) {
   root.id="nonstar-editor";root.className="editor-overlay";root.hidden=true;
   root.innerHTML=`
     <div class="editor-head"><div><div class="modal-eyebrow">NON-STELLAR EDITOR</div>
-      <h2 id="ns-title">非恒星</h2><span class="life-badge">自转 · 经纬度基准 · 大气</span></div>
+      <h2 id="ns-title">非恒星</h2><span class="life-badge">质量 · 外观 · 自转 · 大气</span></div>
       <button class="icon-btn" id="ns-close" title="取消，不保存">✕</button></div>
-    <p class="modal-note">草稿仅在“保存并退出”时写入。这里不改变质量、位置或速度；零经线以自转相位定义。</p>
+    <p class="modal-note">草稿仅在“保存并退出”时写入。不改变位置和速度；质量修改会影响未来轨道。零经线以自转相位定义。</p>
     <div class="editor-columns"><div class="editor-main">
+      <section class="editor-card"><div class="sec-title">物理与外观</div>
+        <div class="form-grid">
+          <label>质量 (M⊕)<input id="ns-mass" type="number" min="0" step="any"></label>
+          <label>反照率<input id="ns-albedo" type="number" min="0" max="1" step="any"></label>
+        </div>
+        <div class="bb-label">显示颜色（RGB · sRGB · 0–255）</div>
+        <div class="bb-grid bb-grid-3">
+          <label>R<input id="ns-color-r" type="number" min="0" max="255" step="any"></label>
+          <label>G<input id="ns-color-g" type="number" min="0" max="255" step="any"></label>
+          <label>B<input id="ns-color-b" type="number" min="0" max="255" step="any"></label>
+        </div>
+        <div class="note">目录圆点、球体与烟迹使用同一 RGB。反照率控制反射强弱，不是自发光。</div>
+      </section>
       <section class="editor-card"><div class="sec-title">自转（北极 = 自转轴方向）</div>
         <div class="form-grid"><label>周期 (h；0 = 不转)<input id="ns-period" type="number" step="any"></label>
         <label>初始相位 (°)<input id="ns-phase" type="number" step="any"></label></div>
@@ -84,7 +98,13 @@ export function initBodyEditor({system,onCommitted}) {
   function payload() {
     const vals=["ns-period","ns-phase","ns-axis-x","ns-axis-y","ns-axis-z"].map(id=>Number($(id).value));
     if(vals.some(x=>!Number.isFinite(x)))throw Error("自转参数必须是有限数值");
-    const out={name,spin_period_h:vals[0],spin_phase_deg:vals[1],spin_axis:vals.slice(2)};
+    const mass=Number($("ns-mass").value),albedo=Number($("ns-albedo").value);
+    const rgb=["r","g","b"].map(c=>Number($(`ns-color-${c}`).value)/255);
+    if(!Number.isFinite(mass)||mass<=0||!Number.isFinite(albedo)||albedo<0||albedo>1)
+      throw Error("质量须为正，反照率须在 0–1");
+    if(rgb.some(x=>!Number.isFinite(x)||x<0||x>1))throw Error("RGB 须在 0–255 内");
+    const out={name,mass_earth:mass,albedo,color_rgb:rgb,
+      spin_period_h:vals[0],spin_phase_deg:vals[1],spin_axis:vals.slice(2)};
     if(!$("ns-has-atm").checked){out.atmosphere=null;return out;}
     const a={model:"spherical_exponential",surface_model:$("ns-surface-model").value,composition:{}};
     for(const [key,,scale=1] of FIELDS){const v=Number($("ns-basic").querySelector(`[data-atm="${key}"]`).value)/scale;if(!Number.isFinite(v))throw Error("大气参数必须为有限数值");a[key]=v;}
@@ -109,6 +129,11 @@ export function initBodyEditor({system,onCommitted}) {
       const d=await api.body(name),b=d.body;
       if(name!==bodyName)return;
       $("ns-title").textContent=b.name;
+      $("ns-mass").value=b.mass_kg/5.9722e24;
+      $("ns-albedo").value=b.albedo;
+      (b.extra?.color_rgb??DEFAULT_BODY_RGB).forEach((value,i)=>{
+        $(`ns-color-${["r","g","b"][i]}`).value=Number((value*255).toFixed(2));
+      });
       $("ns-period").value=(b.rotation_period_s??0)/3600;
       $("ns-phase").value=(b.spin_phase_rad??0)*180/Math.PI;
       ["x","y","z"].forEach((c,i)=>{$(`ns-axis-${c}`).value=b.spin_axis[i];});

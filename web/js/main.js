@@ -93,7 +93,11 @@ async function boot() {
   let atmosphereSerial = 0;
   const bodyEditor = initBodyEditor({
     system,
-    onCommitted: () => { $("#grid-status").textContent = "✓ 天体参数已保存"; },
+    onCommitted: (body) => {
+      scene.refreshBodyAppearance(body.name);
+      catalog.render();
+      $("#grid-status").textContent = "✓ 天体参数已保存";
+    },
   });
 
   const es = new EventSource("/api/stream");
@@ -142,6 +146,7 @@ async function boot() {
   initPanels(panelCtx);
 
   const catalog = buildCatalog(system, (name) => select(name, true));
+  scene.cb.onStarProps = () => catalog.render();
 
   async function select(name, fromUser) {
     if (appMode === "live") { await live?.select(name); return; }
@@ -151,6 +156,7 @@ async function boot() {
     refreshSky();
     if (appMode === "edit" &&
         system.bodies.find((b) => b.name === name)?.kind === "star") {
+      bodyEditor.close();               // only one editor overlay may be visible
       openStarEditor(name);
     } else {
       closeStarEditor();

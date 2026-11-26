@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { OrbitControls } from "/vendor/OrbitControls.js";
 import { api } from "./api.js";
 import { AU } from "./kepler.js";
-import { teffColor } from "./scene3d.js";
+import { teffColor, bodyDisplayColor } from "./scene3d.js";
 
 const PREVIEW_DELAY_MS = 120;
 const SCIENTIFIC_NUMBER_FIELDS = new Set(["mass_value", "radius_value", "a_value"]);
@@ -621,7 +621,7 @@ export function initBodyBuilder({ system, onCommitted }) {
   scene.add(axes);
 
   const markerGeometry = new THREE.SphereGeometry(1, 20, 12);
-  const candidate = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: 0x7aa2e8 }));
+  const candidate = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: bodyDisplayColor({ kind: "body" }) }));
   const parentMarker = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: 0xe8b27d }));
   const candidateGlow = makeStellarGlow();
   const parentGlow = makeStellarGlow();
@@ -717,7 +717,9 @@ export function initBodyBuilder({ system, onCommitted }) {
     candidate.visible = validVec(response.p);
     if (candidate.visible) {
       candidate.position.set(response.p[0], response.p[1], response.p[2]);
-      candidate.material.color.set(response.kind === "star" ? 0xffd29b : 0x7aa2e8);
+      candidate.material.color.copy(bodyDisplayColor({
+        kind: response.kind, extra: { teff_k: response.star?.teff_k },
+      }));
     }
 
     const direct = placement === "direct";

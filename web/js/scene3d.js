@@ -4,6 +4,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "/vendor/OrbitControls.js";
 import { AU, DAY } from "./kepler.js";
+import { blackbodyInfo, bvColor, bodySrgb, STAR_FIELD_VERTEX,
+  STAR_FIELD_FRAGMENT, STAR_RADIANCE_UNIT } from "./color.js";
 
 const TRAIL_CAPACITY = 240;          // ~4 s at 60 Hz, fixed memory per body
 const texLoaderCache = {};
@@ -28,13 +30,41 @@ function glowTexture() {
   return texLoaderCache.glow;
 }
 
-// blackbody-ish colour by Teff
+// Shared physical blackbody-to-display conversion (see color.js).
 export function teffColor(teff) {
-  const t = Math.min(Math.max((teff - 2500) / 5000, 0), 1);
-  const r = 1.0;
-  const g = Math.min(0.45 + 0.55 * t, 1);
-  const b = Math.min(Math.max(0.15 + 0.85 * (t - 0.35) * 1.6, 0.15), 1);
-  return new THREE.Color(r, g, b);
+  return new THREE.Color(...blackbodyInfo(teff).rgb);
+}
+
+export function bodyDisplayColor(body) {
+  return new THREE.Color().setRGB(...bodySrgb(body), THREE.SRGBColorSpace);
+}
+
+const BODY_VERTEX = `
+varying vec3 vWorldNormal;
+void main() {
+  vWorldNormal = normalize(mat3(modelMatrix) * normal);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+function bodyFragment(starCount) {
+  return `
+uniform vec3 uBodyColor;
+uniform vec3 uStarDirection[${Math.max(1, starCount)}];
+uniform vec3 uStarColor[${Math.max(1, starCount)}];
+uniform float uStarWeight[${Math.max(1, starCount)}];
+uniform float uAmbient;
+uniform float uAlbedo;
+varying vec3 vWorldNormal;
+void main() {
+  vec3 n = normalize(vWorldNormal);
+  vec3 light = vec3(0.0);
+  for (int i=0; i<${starCount}; i++) {
+    light += uStarColor[i] * uStarWeight[i] * max(dot(n, uStarDirection[i]), 0.0);
+  }
+  gl_FragColor = vec4(uBodyColor * uAlbedo * (uAmbient + light), 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
 }
 
 function styleRadius(body) {
@@ -142,13 +172,21 @@ export class OrbitScene {
         glow.scale.setScalar(Math.max(R * 2.6, AU * 0.0006));
         group.add(glow);
       } else {
-        const baseHue = 0.58;                 // flat world: one non-star kind
-        const color = new THREE.Color().setHSL(baseHue, 0.35, 0.62);
+        const stars = this.system.bodies.filter((s) => s.kind === "star");
+        const count = Math.max(1, stars.length);
         mesh = new THREE.Mesh(
-          new THREE.SphereGeometry(R, 36, 24),
-          new THREE.MeshStandardMaterial({
-            color, roughness: 0.85, metalness: 0.05,
-            emissive: color, emissiveIntensity: 0.22,   // never fully black
+          new THREE.SphereGeometry(R, 64, 40),
+          new THREE.ShaderMaterial({
+            uniforms: {
+              uBodyColor: { value: bodyDisplayColor(b) },
+              uStarDirection: { value: Array.from({ length: count }, () => new THREE.Vector3()) },
+              uStarColor: { value: Array.from({ length: count }, () => new THREE.Color(1, 1, 1)) },
+              uStarWeight: { value: new Float32Array(count) },
+              uAmbient: { value: 0.015 },
+              uAlbedo: { value: b.albedo },
+            },
+            vertexShader: BODY_VERTEX,
+            fragmentShader: bodyFragment(stars.length),
           })
         );
       }
@@ -218,8 +256,22 @@ export class OrbitScene {
   }
 
   _trailColor(b) {
-    if (b.kind === "star") return new THREE.Color(0xd8b090);
-    return new THREE.Color(0xaab3c8);
+    return bodyDisplayColor(b);
+  }
+
+  /** Apply edited/persisted appearance to the sphere and its trail together. */
+  refreshBodyAppearance(name) {
+    const b = this.system.bodies.find((body) => body.name === name);
+    if (!b) return;
+    const mesh = this.bodyMeshes[name];
+    const color = bodyDisplayColor(b);
+    if (mesh?.material?.color) mesh.material.color.copy(color);
+    mesh?.material?.uniforms?.uBodyColor?.value.copy(color);
+    if (mesh?.material?.uniforms?.uAlbedo) mesh.material.uniforms.uAlbedo.value = b.albedo;
+    const glow = this.bodyGroups[name]?.children.find((ch) => ch.isSprite);
+    if (glow) glow.material.color.copy(color);
+    this.trailByName[name]?.baseColor.copy(color);
+    if (this.trailCount >= 2) this._refreshTrails();
   }
 
   /** Replace the real Hipparcos starfield. Server supplies observer-centric
@@ -234,45 +286,22 @@ export class OrbitScene {
       pos[i * 3 + 1] = data.dir_y[i] * 100;
       pos[i * 3 + 2] = data.dir_z[i] * 100;
       mag[i] = data.mag[i];
-      let r = 1.0, g = 0.96, b = 0.90;          // default / Sun-like
-      const bv = data.bv[i];
-      if (i !== data.sun_index && bv != null) {
-        const t = Math.max(0, Math.min(1, (bv + 0.25) / 2.0));
-        r = 0.62 + 0.38 * t;                   // blue-white -> warm
-        g = 0.72 + 0.22 * t;
-        b = 1.0 - 0.42 * t;
-      }
-      col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b;
+      const rgb = bvColor(data.bv[i]);
+      col[i * 3] = rgb[0]; col[i * 3 + 1] = rgb[1]; col[i * 3 + 2] = rgb[2];
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("aMag", new THREE.BufferAttribute(mag, 1));
     geo.setAttribute("aColor", new THREE.BufferAttribute(col, 3));
     const mat = new THREE.ShaderMaterial({
-      uniforms: { uPixelRatio: { value: this.renderer.getPixelRatio() } },
-      vertexShader: `
-        attribute float aMag;
-        attribute vec3 aColor;
-        varying float vMag;
-        varying vec3 vColor;
-        uniform float uPixelRatio;
-        void main() {
-          vMag = aMag; vColor = aColor;
-          vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          float bright = clamp(7.0 - aMag, 0.0, 10.0);
-          gl_PointSize = (1.1 + 0.48 * bright) * uPixelRatio;
-          gl_Position = projectionMatrix * mv;
-        }`,
-      fragmentShader: `
-        varying float vMag;
-        varying vec3 vColor;
-        void main() {
-          float r = length(gl_PointCoord - vec2(0.5)) * 2.0;
-          if (r > 1.0) discard;
-          float alpha = smoothstep(1.0, 0.12, r);
-          float strength = clamp(1.25 - 0.10 * vMag, 0.22, 1.35);
-          gl_FragColor = vec4(vColor * strength, alpha);
-        }`,
+      uniforms: {
+        uPixelRatio: { value: this.renderer.getPixelRatio() },
+        uRadianceUnit: { value: STAR_RADIANCE_UNIT },
+        uExposure: { value: 16000 },
+        uRaw: { value: false },
+      },
+      vertexShader: STAR_FIELD_VERTEX,
+      fragmentShader: STAR_FIELD_FRAGMENT,
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
     if (this.skyPoints) {
@@ -376,6 +405,7 @@ export class OrbitScene {
     // the point light is positioned at the PRIMARY star (see update()) - its
     // colour must track that same star, whatever the world origin happens to be
     const primary = this.system.bodies.find((b) => b.kind === "star");
+    let appearanceChanged = false;
     for (const b of this.system.bodies) {
       if (b.kind !== "star") continue;
       const st = snap.stars[b.name];
@@ -384,12 +414,20 @@ export class OrbitScene {
       const g = this.bodyGroups[b.name];
       if (g) g.scale.setScalar(Math.max(st.radius_m / base, 1e-3));
       const c = teffColor(st.teff_k ?? 5772);
+      const previousTeff = b.extra?.teff_k;
+      b.extra = { ...(b.extra ?? {}), teff_k: st.teff_k };
+      if (previousTeff !== st.teff_k) {
+        appearanceChanged = true;
+        this.cb.onStarProps?.();
+      }
       const mesh = this.bodyMeshes[b.name];
       if (mesh?.material?.color) mesh.material.color.copy(c);
       const glow = g?.children.find((ch) => ch.isSprite);
       if (glow) glow.material.color.copy(c);
+      this.trailByName[b.name]?.baseColor.copy(c);
       if (primary && b.name === primary.name) this.starLight.color.copy(c);
     }
+    if (appearanceChanged && this.trailCount >= 2) this._refreshTrails();
   }
 
   buildGrid() {
@@ -513,6 +551,30 @@ export class OrbitScene {
     return p ?? [0, 0, 0];
   }
 
+  _updateBodyLighting(body) {
+    const uniforms = this.bodyMeshes[body.name]?.material?.uniforms;
+    if (!uniforms?.uStarDirection) return;
+    const stars = this.system.bodies.filter((b) => b.kind === "star");
+    const p = this._posOf(body.name);
+    const flux = stars.map((s) => {
+      const q = this._posOf(s.name);
+      const dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2];
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const lum = this.snap?.stars?.[s.name]?.luminosity_w ?? s.luminosity_w ?? 0;
+      return d2 > 0 ? lum / d2 : 0;
+    });
+    const total = flux.reduce((a, v) => a + v, 0);
+    stars.forEach((s, i) => {
+      const q = this._posOf(s.name);
+      uniforms.uStarDirection.value[i].set(q[0] - p[0], q[1] - p[1], q[2] - p[2]).normalize();
+      const st = this.snap?.stars?.[s.name];
+      uniforms.uStarColor.value[i].copy(teffColor(st?.teff_k ?? s.extra?.teff_k ?? 5772));
+      // Geometry comes from the authoritative positions. Relative flux only
+      // balances the visible lights; this is not an N-body or climate solver.
+      uniforms.uStarWeight.value[i] = total > 0 ? flux[i] / total : 0;
+    });
+  }
+
   update(tDays) {
     // adaptive near plane: true-scale bodies are tiny, the camera must be
     // able to fly in close (fixed AU*0.001 near would clip a 4 R_E planet)
@@ -546,6 +608,7 @@ export class OrbitScene {
       m.quaternion.copy(_qAlign).multiply(_qSpin);
       const ring = this.ringMeshes[b.name];
       if (ring) ring.quaternion.setFromUnitVectors(_Z_AXIS, _spinAxis);
+      if (b.kind !== "star") this._updateBodyLighting(b);
     }
     // star light follows the primary star (rendered position)
     const primary = this.system.bodies.find((b) => b.kind === "star");

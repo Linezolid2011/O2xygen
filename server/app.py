@@ -56,6 +56,7 @@ from o2xygen.astroframe import (normalize_astro_frame, position_radec,
 from o2xygen.atmosphere import normalize_atmosphere, default_atmosphere, SphericalAtmosphere
 from o2xygen.observation import normalize_point, validate_points, local_frame, enu_angles
 from o2xygen.atmosphere_cache import optics_key, load_or_build_atmosphere, spectrum_rgb
+from o2xygen.appearance import normalize_color_rgb
 
 WEB_DIR = ROOT / "web"
 DOCS_DIR = ROOT / "docs"
@@ -609,7 +610,12 @@ def api_star_edit(body):
 
 # ------------------------------------------------------- non-star editing ---
 def api_body_edit(body):
-    """Commit non-star spin/atmosphere inputs without changing orbital state."""
+    """Commit non-star mass/albedo/RGB/spin/atmosphere inputs.
+
+    Position and velocity are never silently translated or boosted. A mass
+    change starts a new conservation baseline and can change the future orbit;
+    the editor must not pretend that a new mass has identical future dynamics.
+    """
     if _evolution_active():
         raise HttpError(409, "推演进行中,不能编辑天体")
     name = _body_str(body, "name", required=True)
@@ -620,9 +626,17 @@ def api_body_edit(body):
         raise HttpError(400, "此接口仅编辑非恒星天体")
     period_h = _body_float(body, "spin_period_h", (b.rotation_period_s or 0) / 3600)
     phase_deg = _body_float(body, "spin_phase_deg", np.degrees(b.spin_phase_rad))
-    _finite([period_h, phase_deg])
+    mass_earth = _body_float(body, "mass_earth", b.mass_kg / M_EARTH)
+    albedo = _body_float(body, "albedo", b.albedo)
+    _finite([period_h, phase_deg, mass_earth, albedo])
     if period_h < 0.0:
         raise HttpError(400, "自转周期不得为负；0 表示不自转")
+    if mass_earth <= 0.0 or not 0.0 <= albedo <= 1.0:
+        raise HttpError(400, "质量须为正，反照率须在 0–1")
+    try:
+        color_rgb = normalize_color_rgb(body.get("color_rgb", b.extra.get("color_rgb")))
+    except ValueError as e:
+        raise HttpError(400, str(e))
     axis = np.asarray(body.get("spin_axis", b.spin_axis), dtype=float)
     if axis.shape != (3,) or not np.all(np.isfinite(axis)) or np.linalg.norm(axis) < 1e-15:
         raise HttpError(400, "自转轴必须为三个有限且非零的数值")
@@ -640,6 +654,16 @@ def api_body_edit(body):
         spins = WS._spin_map(WS.sim.t_s)
         spins[name] = {"w": b.spin_vector(), "phase": b.spin_phase_rad}
         WS._write_live_spins(spins, WS.sim.t_s)
+        mass_kg = mass_earth * M_EARTH
+        particle = WS.sim.sim.particles[WS.sim._index[name]]
+        if float(particle.m) != mass_kg:
+            WS.sim.update_masses({name: mass_kg}, record_wind=False)
+            WS.sim.wind.clear(WS.sim.t_s)
+            WS.sim._cp_times = [float(WS.sim.t_s)]
+            WS.sim._cp_snaps = [WS.sim._snapshot()]
+        b.mass_kg = mass_kg
+        b.albedo = albedo
+        b.extra["color_rgb"] = color_rgb
         if atmosphere is None:
             b.extra.pop("atmosphere", None)
         else:
@@ -788,6 +812,10 @@ def _body_draft(data: dict):
                          albedo=albedo, spin_axis=axis,
                          spin_rate_rad_s=2*np.pi/(period_h*3600) if period_h else 0.0,
                          spin_phase_rad=np.radians(phase_deg))
+        try:
+            candidate.extra["color_rgb"] = normalize_color_rgb(data.get("color_rgb"))
+        except ValueError as e:
+            raise HttpError(400, str(e))
         if atmosphere is not None:
             candidate.extra["atmosphere"] = atmosphere
         nonstar_out = {"mean_density_kg_m3": rho, "mean_density_g_cm3": rho / 1000.0,

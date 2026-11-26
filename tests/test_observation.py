@@ -170,3 +170,30 @@ def test_observation_crud_confirm_and_nonstar_spin_edit(tmp_path,monkeypatch):
     assert e.value.status == 400
     app.api_delete_observation({"name":"renamed","confirm":True})
     assert [p["name"] for p in app.api_list_observations()["points"]] == ["site"]
+
+
+def test_nonstar_mass_albedo_and_rgb_edit_round_trip(tmp_path, monkeypatch):
+    import app
+    from o2xygen.appearance import DEFAULT_BODY_RGB
+    s=_observer_world();ws=Workspace(s,grid_getter=None)
+    monkeypatch.setattr(app,"SYSTEM",s);monkeypatch.setattr(app,"WS",ws)
+    monkeypatch.setattr(app,"CURRENT_WORLD","appearance")
+    monkeypatch.setattr(app,"WORLDS_DIR",tmp_path)
+    monkeypatch.setattr(app,"_evolution_active",lambda:False)
+    before=ws.sim.live_state()
+    app.api_body_edit({"name":"P","mass_earth":2.0,"albedo":0.31,
+                       "color_rgb":[0.8,0.4,0.2]})
+    assert s.bodies["P"].mass_kg == pytest.approx(2*M_EARTH)
+    assert s.bodies["P"].albedo == pytest.approx(0.31)
+    assert s.bodies["P"].extra["color_rgb"] == [0.8,0.4,0.2]
+    assert ws.sim.sim.particles[ws.sim._index["P"]].m == pytest.approx(2*M_EARTH)
+    for n,(p,v) in ws.sim.live_state().items():
+        np.testing.assert_array_equal(p,before[n][0])
+        np.testing.assert_array_equal(v,before[n][1])
+    back=load_world(app._world_path("appearance"))
+    assert back.bodies["P"].extra["color_rgb"] == [0.8,0.4,0.2]
+    with pytest.raises(app.HttpError):app.api_body_edit({"name":"P","mass_earth":0})
+    with pytest.raises(app.HttpError):app.api_body_edit({"name":"P","color_rgb":[1,2]})
+    candidate,_star,_body=app._body_draft({"name":"new","kind":"body","mass_value":1,
+        "radius_value":1,"mass_unit":"earth","radius_unit":"earth"})
+    assert candidate.extra["color_rgb"] == DEFAULT_BODY_RGB

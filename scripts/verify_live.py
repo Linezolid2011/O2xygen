@@ -43,12 +43,22 @@ with sync_playwright() as p:
     editor = page.evaluate("({period:document.querySelector('#ns-period').value,phase:document.querySelector('#ns-phase').value,atm:document.querySelector('#ns-has-atm').checked})")
     assert editor["atm"] is True
     page.screenshot(path=str(root / "shots" / "body-editor.png"))
+    # Regression: the non-star overlay must not cover a subsequently selected
+    # star editor. Exercise both directions through the real selection callback.
+    page.evaluate("window.__scene.cb.onSelect('Αστραία')")
+    page.wait_for_selector("#star-editor:not([hidden])", timeout=30000)
+    assert page.evaluate("document.querySelector('#nonstar-editor').hidden") is True
+    page.evaluate("window.__scene.cb.onSelect('Νεφέλη')")
+    page.wait_for_selector("#nonstar-editor:not([hidden])", timeout=30000)
+    editor_switch = page.evaluate("({starHidden:document.querySelector('#star-editor').hidden,bodyHidden:document.querySelector('#nonstar-editor').hidden})")
+    assert editor_switch == {"starHidden": True, "bodyHidden": False}, editor_switch
     page.locator("#ns-close").click()
     page.locator('[data-app-mode="view"]').click()
     page.wait_for_selector("body.mode-view", timeout=30000)
     restored = page.evaluate("({panel:!document.querySelector('#panel-body').hidden,title:document.querySelector('#catalog-head-title').textContent,evolveDisabled:document.querySelector('#btn-evolve').disabled})")
     print(json.dumps({"zenith": zenith, "pixels": pixels, "home": home,
-                      "editor": editor, "restored": restored}, ensure_ascii=False, indent=2))
+                      "editor": editor, "editor_switch": editor_switch,
+                      "restored": restored}, ensure_ascii=False, indent=2))
     print("ERRORS", json.dumps(errors, ensure_ascii=False))
     bad = [x for x in logs if x.startswith("[error]")]
     print("LOGS", json.dumps(bad, ensure_ascii=False))

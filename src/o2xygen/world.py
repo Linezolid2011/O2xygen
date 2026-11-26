@@ -121,6 +121,9 @@ def system_to_dict(system: System) -> dict:
                     extra.pop("atmosphere", None)
                 else:
                     extra["atmosphere"] = normalize_atmosphere(extra["atmosphere"])
+                if "color_rgb" in extra:
+                    from .appearance import normalize_color_rgb
+                    extra["color_rgb"] = normalize_color_rgb(extra["color_rgb"])
             if extra:
                 d["extra"] = _json_safe(extra)
             else:
@@ -181,6 +184,9 @@ def dict_to_system(d: dict) -> System:
             else:
                 from .atmosphere import normalize_atmosphere
                 extra["atmosphere"] = normalize_atmosphere(extra["atmosphere"])
+            if "color_rgb" in extra:
+                from .appearance import normalize_color_rgb
+                extra["color_rgb"] = normalize_color_rgb(extra["color_rgb"])
         system.add(Body(
             bd["name"], kind,
             mass_kg=mass_kg,

@@ -1,19 +1,15 @@
 // Left sidebar: body catalog tree.
+import { bodyHex } from "./color.js";
+
 export function buildCatalog(system, onSelect) {
   const ul = document.getElementById("catalog");
   const count = document.getElementById("catalog-count");
   const filter = document.getElementById("catalog-filter");
   const items = {};
+  let selectedName = null;
 
   function kindColor(b) {
-    if (b.kind === "star") {
-      const t = b.extra?.teff_k ?? 5772;
-      if (t > 6200) return "#fdf6e3";
-      if (t > 5400) return "#ffe9b8";
-      if (t > 4200) return "#ffc98a";
-      return "#ff9a6a";
-    }
-    return "#7aa2e8";                      // flat world: one non-star kind (ADR-0016)
+    return bodyHex(b);   // the same source as the sphere and its trail
   }
 
   function render() {
@@ -24,6 +20,7 @@ export function buildCatalog(system, onSelect) {
       if (q && !b.name.toLowerCase().includes(q)) continue;
       const li = document.createElement("li");
       li.dataset.name = b.name;
+      if (b.name === selectedName) li.classList.add("selected");
       // no privileged origin body (ADR-0022): the mark slot stays empty;
       // names are user-supplied and persisted: textContent, never innerHTML
       const mark = document.createElement("span");
@@ -53,6 +50,7 @@ export function buildCatalog(system, onSelect) {
   return {
     render,
     select(name) {
+      selectedName = name;
       for (const li of Object.values(items)) li.classList.remove("selected");
       if (items[name]) items[name].classList.add("selected");
     },

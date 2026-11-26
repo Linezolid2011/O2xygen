@@ -2,6 +2,7 @@
 import { api } from "./api.js";
 import { tempChart } from "./charts.js";
 import { teffColor } from "./scene3d.js";
+import { bodyHex } from "./color.js";
 import { AU, DAY } from "./kepler.js";
 
 const $ = (sel) => document.querySelector(sel);
@@ -59,8 +60,7 @@ export async function showBody(name) {
   if (!b) return;
   $("#body-name").textContent = b.name;
   $("#body-kind").textContent = b.kind === "star" ? "恒星" : "天体";
-  $("#body-swatch").style.background = b.kind === "star"
-    ? `#${teffColor(b.extra?.teff_k ?? 5772).getHexString()}` : "#7aa2e8";
+  $("#body-swatch").style.background = bodyHex(b);
 
   // render catalog physics immediately; the osculating/irradiation fetch
   // must never leave the previous body's panel on screen while in flight
