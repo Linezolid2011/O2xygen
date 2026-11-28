@@ -33,6 +33,22 @@ function glowTexture() {
   return texLoaderCache.glow;
 }
 
+// Soft round sprite for the screen-space observation-point markers.
+function circleTexture() {
+  if (texLoaderCache.dot) return texLoaderCache.dot;
+  const c = document.createElement("canvas");
+  c.width = c.height = 32;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.62, "rgba(255,255,255,1)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 32, 32);
+  texLoaderCache.dot = new THREE.CanvasTexture(c);
+  return texLoaderCache.dot;
+}
+
 // Shared physical blackbody-to-display conversion (see color.js).
 export function teffColor(teff) {
   return new THREE.Color(...blackbodyInfo(teff).rgb);
@@ -472,6 +488,18 @@ export class OrbitScene {
       this.bodyMeshes[b.name].add(g);
       this.overlayGroups[b.name] = g;
     }
+    // screen-space observation markers: one shared material, constant
+    // apparent size at ANY zoom (user ruling, branch 2). size is in device
+    // pixels, so scale it by the capped pixelRatio.
+    this.dotMaterial = new THREE.PointsMaterial({
+      color: 0xff5a5a,
+      size: 7 * this.renderer.getPixelRatio(),
+      sizeAttenuation: false,
+      map: circleTexture(),
+      transparent: true,
+      alphaTest: 0.35,
+      depthWrite: false,
+    });
   }
 
   /** Meridians every 30°, parallels every 30° (poles excluded). Overlay-local
@@ -516,19 +544,26 @@ export class OrbitScene {
     for (const [body, list] of Object.entries(byBody)) {
       const g = this.overlayGroups[body];
       if (!g) continue;                 // points exist only on non-stellar bodies
-      const R = this.displayRadii[body];
-      const dotR = R * 0.016;           // drawn to scale (ADR-0017), no floor
+      const R = this.displayRadii[body] * 1.002;   // just above the surface
+      const local = [];
       for (const p of list) {
         const lat = p.latitude_deg * Math.PI / 180, lon = p.longitude_deg * Math.PI / 180;
-        const cl = Math.cos(lat), rr = R * 1.004;
-        const dot = new THREE.Mesh(
-          new THREE.SphereGeometry(dotR, 10, 8),
-          new THREE.MeshBasicMaterial({ color: 0xff5a5a }));
+        const cl = Math.cos(lat);
         // same overlay-local parametrization as the graticule above
-        dot.position.set(rr * cl * Math.sin(lon), rr * Math.sin(lat),
-                         rr * cl * Math.cos(lon));
-        g.add(dot);
-        this.pointDots[p.name] = dot;
+        local.push(R * cl * Math.sin(lon), R * Math.sin(lat), R * cl * Math.cos(lon));
+      }
+      // markers are a usability aid, not a size claim (cf. the pick proxies):
+      // THREE.Points with sizeAttenuation:false renders every dot at the
+      // same screen size regardless of camera distance
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(local, 3));
+      g.add(new THREE.Points(geo, this.dotMaterial));
+      for (let i = 0; i < list.length; i++) {
+        const p = list[i];
+        const anchor = new THREE.Object3D();
+        anchor.position.set(local[i * 3], local[i * 3 + 1], local[i * 3 + 2]);
+        g.add(anchor);
+        this.pointDots[p.name] = anchor;    // label anchor; pixels come from Points
         const div = document.createElement("div");
         div.className = "point-label";
         div.textContent = p.name;       // user-supplied names: textContent only
