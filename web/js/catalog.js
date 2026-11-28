@@ -54,5 +54,10 @@ export function buildCatalog(system, onSelect) {
       for (const li of Object.values(items)) li.classList.remove("selected");
       if (items[name]) items[name].classList.add("selected");
     },
+    /** branch 2: catalog-driven deselection clears the highlight. */
+    clear() {
+      selectedName = null;
+      for (const li of Object.values(items)) li.classList.remove("selected");
+    },
   };
 }

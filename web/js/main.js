@@ -2,7 +2,7 @@
 import { api, errDetail } from "./api.js";
 import { OrbitScene, teffColor } from "./scene3d.js";
 import { buildCatalog } from "./catalog.js";
-import { initPanels, showBody, onTimeChanged, setPanelMode } from "./panels.js";
+import { initPanels, showBody, clearBody, onTimeChanged, setPanelMode } from "./panels.js";
 import { initTimeline } from "./timeline.js";
 import { initBodyBuilder } from "./add_body.js";
 import { initLiveMode } from "./live.js";
@@ -145,11 +145,19 @@ async function boot() {
   };
   initPanels(panelCtx);
 
-  const catalog = buildCatalog(system, (name) => select(name, true));
+  const catalog = buildCatalog(system, (name) => select(name, true, "catalog"));
   scene.cb.onStarProps = () => catalog.render();
 
-  async function select(name, fromUser) {
+  async function select(name, fromUser, source) {
     if (appMode === "live") { await live?.select(name); return; }
+    // branch 2: re-clicking the ALREADY-SELECTED entry in the left catalog
+    // toggles the selection OFF and recenters the view on the archive origin.
+    // Only the catalog does this — canvas picks always (re)select and never
+    // deselect (user ruling, branch 2 feature list).
+    if (appMode === "view" && fromUser && source === "catalog" && selected === name) {
+      deselect();
+      return;
+    }
     selected = name;
     catalog.select(name);
     scene.select(name);
@@ -163,6 +171,15 @@ async function boot() {
       if (appMode === "edit") bodyEditor.open(name);
     }
     await showBody(name);
+  }
+
+  /** branch 2: no selection — clear catalog highlight, scene tag and panel,
+   *  then fly the view back to the fixed archive origin (ADR-0035). */
+  function deselect() {
+    selected = null;
+    catalog.clear();
+    scene.clearSelection();       // also flies the view to the archive origin
+    clearBody();
   }
 
   // Real starfield: server computes observer-centric Hipparcos directions.

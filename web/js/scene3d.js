@@ -506,6 +506,29 @@ export class OrbitScene {
     this.focusOn(name);           // selection recenters the view
   }
 
+  /** branch 2: the catalog re-click toggle dropped the selection — clear the
+   *  highlight tag and fly the view back to the fixed archive origin. */
+  clearSelection() {
+    this.selected = null;
+    this._followLast = null;
+    for (const [n, div] of Object.entries(this.labelDivs)) {
+      div.classList.remove("sel");
+      div.textContent = n;
+    }
+    this.focusOrigin();
+  }
+
+  /** Fly the camera so the fixed world origin (0,0,0, ADR-0035) sits at the
+   *  viewport center, keeping the current heading and distance. */
+  focusOrigin() {
+    const target = new THREE.Vector3(0, 0, 0);
+    const dir = this.camera.position.clone().sub(this.controls.target).normalize();
+    const dist = this.camera.position.distanceTo(this.controls.target);
+    const toPos = target.clone().addScaledVector(
+      dir, Math.min(Math.max(dist, AU * 0.0002), AU * 400));
+    this._flyTo(target, toPos, 600);
+  }
+
   focusSelected() {
     if (this.selected) this.focusOn(this.selected);
   }

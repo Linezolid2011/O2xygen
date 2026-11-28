@@ -78,6 +78,25 @@ export async function showBody(name) {
   renderIntro(b);
 }
 
+/** branch 2: the catalog re-click toggle deselected everything — show an
+ *  empty panel until the next selection. Stale in-flight showBody calls die
+ *  on the `current !== body` guard because current is null here. */
+export function clearBody() {
+  current = null;
+  lastBodyData = null;
+  paramsNeedsRefresh = false;
+  lastTempData = null;
+  chart?.u.destroy();
+  chart = null;
+  $("#body-name").textContent = "—";
+  $("#body-kind").textContent = "—";
+  $("#body-swatch").style.background = "transparent";
+  const empty = `<div class="note">未选中天体 —— 点击左侧目录或画布中的天体查看详情。</div>`;
+  $("#tab-params").innerHTML = empty;
+  $("#tab-temperature").innerHTML = empty;
+  $("#tab-intro").innerHTML = empty;
+}
+
 /* ============================== 基础参数 ============================== */
 async function renderParams(b) {
   const el = $("#tab-params");
@@ -399,8 +418,7 @@ function renderAtmosphere(b) {
   });
 }
 
-/* ============================== 温度表 ============================== */
-async function renderTemperature(b) {
+/* ============================== 温度表 ============================== */async function renderTemperature(b) {
   const el = $("#tab-temperature");
   // a new body invalidates the old body's chart/table immediately
   chart?.u.destroy();
