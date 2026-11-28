@@ -13,7 +13,16 @@ O₂xygen 作为独立产品演进。
 
 ## [Unreleased] - branch 2(0.4.x)
 
-_尚无条目。_
+### 修复
+
+- **非恒星天体暗面半透明/透视(0.4.1 回归)**:0.4.1 将非恒星球体换成自定义
+  ShaderMaterial(昼夜受光/晨昏线),但渲染器开着 `logarithmicDepthBuffer`,
+  自定义 shader 未包含 `logdepthbuf` 着色块,深度写入标度与内置材质错位——
+  远处恒星球面与行星环远端会直接画在行星暗面之上,特定角度下暗面看似
+  半透明甚至全透明。shader 现按 three r187 约定补齐 `common` 与
+  `logdepthbuf_pars_vertex/vertex/pars_fragment/fragment`。
+  修复前后对照:`shots/nonstar-darkside-before.png` / `shots/nonstar-darkside-after.png`
+  (遮挡测试:相机置于恒星-行星连线上,恒星恰被行星盘挡住)。
 
 ## [0.1.1] - 2026-11-15
 

@@ -39,15 +39,25 @@ export function bodyDisplayColor(body) {
   return new THREE.Color().setRGB(...bodySrgb(body), THREE.SRGBColorSpace);
 }
 
+// logarithmicDepthBuffer is ON (AU-scale depth range): custom shaders MUST
+// include the logdepthbuf chunks, otherwise their gl_Depth values live on
+// the standard-projection scale while every built-in material writes the
+// logarithmic scale. The mismatch made distant star spheres and ring far
+// sides draw straight through a planet's night side (0.4.1 regression:
+// dark side looked semi-transparent / fully transparent at some angles).
 const BODY_VERTEX = `
+#include <common>
+#include <logdepthbuf_pars_vertex>
 varying vec3 vWorldNormal;
 void main() {
   vWorldNormal = normalize(mat3(modelMatrix) * normal);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  #include <logdepthbuf_vertex>
 }`;
 
 function bodyFragment(starCount) {
   return `
+#include <logdepthbuf_pars_fragment>
 uniform vec3 uBodyColor;
 uniform vec3 uStarDirection[${Math.max(1, starCount)}];
 uniform vec3 uStarColor[${Math.max(1, starCount)}];
@@ -56,6 +66,7 @@ uniform float uAmbient;
 uniform float uAlbedo;
 varying vec3 vWorldNormal;
 void main() {
+  #include <logdepthbuf_fragment>
   vec3 n = normalize(vWorldNormal);
   vec3 light = vec3(0.0);
   for (int i=0; i<${starCount}; i++) {
