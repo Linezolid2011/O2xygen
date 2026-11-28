@@ -7,6 +7,14 @@ O₂xygen 作为独立产品演进。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+> **分支说明 —— 本文件维护在 branch 2(`0.4.x`)**:本分支基于 0.4.x 做 bugfix
+> 与 UI 打磨,以下 Unreleased 条目只记录 0.4.x 线的修复与打磨。0.5.x 新特性
+> (ExoPlaSim + SBDART 接入)在 branch 1 开发,不记录在此。
+
+## [Unreleased] - branch 2(0.4.x)
+
+_尚无条目。_
+
 ## [0.1.1] - 2026-11-15
 
 ### 数据分发(用户裁定)
