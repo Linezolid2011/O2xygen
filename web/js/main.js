@@ -70,6 +70,7 @@ async function boot() {
   let evolving = false;
   let streamLive = false;
   let appMode = "view";         // default on every boot; never persisted
+  let resourcesReady = false;   // atomic canvas gate: no half-loaded scene
 
   // Time ONLY moves via 推演 (user spec 2026-11-15): in idle mode the
   // timeline is inert (NaN ticks, dead play button); during evolution the
@@ -233,6 +234,10 @@ async function boot() {
     onTimeChanged();
   }, 250);
   (function frame() {
+    if (!resourcesReady) {
+      requestAnimationFrame(frame);
+      return;                    // loading overlay is the ONLY visible canvas
+    }
     if (appMode === "live") {
       surface.render();       // latest authoritative observation; no time advance
     } else {
@@ -422,7 +427,7 @@ async function boot() {
   // ---------------- view / edit mode ----------------
   const modeButtons = [...document.querySelectorAll("#mode-toggle .pill")];
   async function setAppMode(next) {
-    if (next === appMode) return;
+    if (!resourcesReady || next === appMode) return;
     modeButtons.forEach((b) => { b.disabled = true; });
     try {
       // A mode switch ALWAYS cancels an active job, even if it was started
@@ -768,7 +773,49 @@ async function boot() {
 
   // initial selection: the moon he had selected in the screenshots
   await select(system.bodies.some((b) => b.name === "Αύρα") ? "Αύρα" : system.bodies[0].name);
-  scene.render();
+
+  // Atomic resource gate (0.4.3): MIST + MIST III + WDCool, every star's
+  // first authoritative properties, and the real Hipparcos starfield must
+  // ALL be present before the normal canvas is rendered or mode switching
+  // is accepted. Until then the opaque "加载中" layer is the only view.
+  const loadingDetail = $("#resource-loading-detail");
+  let resourceTimer = null;
+  let resourceCheckInFlight = false;
+  async function checkResourceReadiness() {
+    if (resourcesReady || resourceCheckInFlight) return;
+    resourceCheckInFlight = true;
+    try {
+      const status = await api.starStatus();
+      const gridsReady = status.ready && status.wd_ready && status.wdcool_ready;
+      const propsReady = system.bodies.every((b) => b.kind !== "star" ||
+        scene.snap?.stars?.[b.name]?.properties_ready === true);
+      const skyReady = !!scene.skyPoints;
+      const pending = [];
+      if (!status.ready) pending.push("MIST 演化网格");
+      if (!status.wd_ready) pending.push("MIST III 白矮星网格");
+      if (!status.wdcool_ready) pending.push("WDCool 冷却网格");
+      if (!propsReady) pending.push("恒星首轮属性");
+      if (!skyReady) pending.push("Hipparcos 真实星场");
+      if (gridsReady && propsReady && skyReady) {
+        resourcesReady = true;
+        if (resourceTimer !== null) clearInterval(resourceTimer);
+        resourceTimer = null;
+        $("#resource-loading").hidden = true;
+        document.body.classList.add("resources-ready");
+        scene.render();           // first normal frame, fully initialized
+      } else {
+        loadingDetail.textContent = `正在准备：${pending.join(" · ")}`;
+        if (status.error) loadingDetail.textContent += `（${status.error}）`;
+        if (gridsReady && propsReady && !skyReady) await refreshSky();
+      }
+    } catch {
+      loadingDetail.textContent = "正在等待服务器资源状态…";
+    } finally {
+      resourceCheckInFlight = false;
+    }
+  }
+  resourceTimer = setInterval(() => { void checkResourceReadiness(); }, 500);
+  await checkResourceReadiness();
 }
 
 boot().catch((e) => {

@@ -121,6 +121,30 @@ body {
 /* viewport */
 #viewport-wrap { flex: 1; position: relative; min-width: 0; background: #0a0c11; }
 #gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* No half-initialized scene (0.4.3): the canvas stays covered AND unrendered
+   until every stellar grid, first authoritative star property and the real
+   starfield are ready. main.js removes this gate only as one atomic action. */
+#resource-loading {
+  position: absolute; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: #0a0c11; color: var(--text-dim);
+}
+#resource-loading[hidden] { display: none; }
+.resource-loading-card {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 28px 36px; border: 1px solid var(--border-soft); border-radius: 12px;
+  background: rgba(23,26,34,.72); box-shadow: 0 14px 42px rgba(0,0,0,.24);
+}
+.resource-loading-card strong { color: var(--text); font-size: 17px; letter-spacing: 2px; }
+#resource-loading-detail { max-width: 360px; text-align: center; font-size: 12px; line-height: 1.7; }
+.resource-spinner {
+  width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: resource-spin .9s linear infinite;
+}
+@keyframes resource-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .resource-spinner { animation: none; border-color: var(--accent-dim); }
+}
 .pill-group {
   position: absolute; top: 12px; left: 12px; display: flex; gap: 3px;
   background: rgba(23,26,34,.85); border: 1px solid var(--border-soft);
