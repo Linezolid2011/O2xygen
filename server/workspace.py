@@ -94,7 +94,12 @@ class Workspace:
         """Apply MIST track masses/luminosities at sim time t_s.
         Returns True if the grid was available (settled)."""
         props = self._star_props_at(t_s)
-        if not props:
+        required = [s for s in self.system.stars()
+                    if s.extra.get("age0_gyr") is not None]
+        if not props or any(s.name not in props for s in required):
+            # Grids load in stages. A partial result must NOT mark the epoch
+            # settled: doing so strands unavailable WDs at their MIST seed
+            # mass forever (the Eidolon cold-start race, 0.4.3).
             return False
         # Settling MIST seed masses onto the epoch is initialization, not a
         # new wind pulse.  In particular, a save's existing wind ledger must
@@ -500,6 +505,11 @@ class Workspace:
         for s in self.system.stars():
             p = props.get(s.name)
             stars[s.name] = {
+                # Seed mass/radius are inputs/placeholders, not current stellar
+                # outputs. Tell the client when a staged grid is still pending
+                # instead of presenting a giant progenitor as a settled WD.
+                "properties_ready": p is not None,
+                "mass_kg": float(p["mass_kg"]) if p else None,
                 "teff_k": float(p["teff_k"]) if p else float(s.extra.get("teff_k", 5772.0)),
                 "radius_m": float(p["radius_m"]) if p else float(s.radius_m),
                 "luminosity_w": float(p["luminosity_w"]) if p else float(s.luminosity_w),

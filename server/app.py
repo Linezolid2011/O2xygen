@@ -217,8 +217,8 @@ def _rebuild(system: System, name: str) -> None:
     CURRENT_WORLD = name
 
 
-def body_json(b: Body) -> dict:
-    return {
+def body_json(b: Body, properties_ready: bool = True) -> dict:
+    d = {
         "name": b.name, "kind": b.kind,
         "kind_label": "恒星" if b.kind == STAR else "天体",
         "mass_kg": b.mass_kg, "radius_m": b.radius_m,
@@ -229,7 +229,16 @@ def body_json(b: Body) -> dict:
         "spin_phase_rad": float(b.spin_phase_rad),
         "luminosity_w": b.luminosity_w,
         "extra": b.extra,
+        "properties_ready": bool(properties_ready),
     }
+    if b.kind == STAR and not properties_ready:
+        # A MIST seed is not the current stellar mass, and an unloaded radius
+        # is zero. Expose neither as a physical output during staged startup.
+        d["mass_kg"] = None
+        d["radius_m"] = None
+        d["luminosity_w"] = None
+        d["extra"] = {k: v for k, v in b.extra.items() if k != "teff_k"}
+    return d
 
 
 # ------------------------------------------------------------- evolution ----
@@ -287,11 +296,13 @@ def _query_float(query: dict, key: str) -> float | None:
 
 # ------------------------------------------------------------------ API ------
 def api_get_system():
+    props = WS._star_props_at(WS.sim.t_s)
     return {"name": SYSTEM.name, "world": CURRENT_WORLD,
             "origin": SYSTEM.origin,
             "version": VERSION,
             "engine": {"integrator": WS.sim.integrator, "dt_s": WS.sim.dt_s},
-            "bodies": [body_json(b) for b in SYSTEM.bodies.values()],
+            "bodies": [body_json(b, properties_ready=b.kind != STAR or b.name in props)
+                       for b in SYSTEM.bodies.values()],
             "observations": [dict(p) for p in SYSTEM.observation_points]}
 
 
@@ -331,8 +342,9 @@ def api_get_body(name, query):
                       "active": age_yr >= formation and not covered}
     except Exception:
         cool_input = None
+    props = WS._star_props_at(WS.sim.t_s)
     return {
-        "body": body_json(b),
+        "body": body_json(b, properties_ready=b.kind != STAR or b.name in props),
         "illumination": ill,
         "flux_wm2": flux,
         "t_eq_k": T_eq,

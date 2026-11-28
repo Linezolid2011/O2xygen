@@ -27,10 +27,22 @@ def resolve_stellar(mini_msun: float, feh: float, age_yr: float,
     use_cool = cool is not None and wd_mass is not None \
         and formation is not None and not covered
     model = "mist"
-    if wd is not None and wd.is_wd_age(mini_msun, feh, age_yr):
-        model = "wdcool" if use_cool else "mist3_wd"
-    elif use_cool and age_yr >= formation:
-        model = "wdcool"
+    if formation is not None and age_yr >= formation:
+        # Once formation has passed, the progenitor's MIST endpoint is never
+        # an acceptable fallback. Grid loading is staged (MIST -> MIST III ->
+        # WDCool), so availability must be explicit: an out-of-MIST-III WD
+        # waits for WDCool instead of being squeezed onto a covered WD track.
+        if use_cool:
+            model = "wdcool"
+        elif covered and wd is not None:
+            model = "mist3_wd"
+        elif wd_mass is None and wd is not None \
+                and wd.is_wd_age(mini_msun, feh, age_yr):
+            # MIST III can evaluate from progenitor mass/age even when the
+            # main MIST grid is unavailable to supply an IFMR final point.
+            model = "mist3_wd"
+        else:
+            model = "unavailable"
     return {"model": model, "wd_mass_msun": wd_mass,
             "formation_age_yr": formation, "covered_by_mist3": covered,
             "cooling_age_yr": max(0.0, age_yr - formation)
@@ -62,6 +74,8 @@ def segments_with_wd_stage(segments: list[dict], formation_age_yr: float | None)
 def evaluate_stellar(mini_msun: float, feh: float, age_yr: float,
                      mist, wd, cool, extra: dict | None = None):
     r = resolve_stellar(mini_msun, feh, age_yr, mist, wd, cool, extra)
+    if r["model"] == "unavailable":
+        raise ValueError("WD cooling data are not ready for this mass range")
     if r["model"] == "wdcool":
         return cool.evaluate(r["wd_mass_msun"], r["cooling_age_yr"],
                              (extra or {}).get("wd_envelope", "thick"))

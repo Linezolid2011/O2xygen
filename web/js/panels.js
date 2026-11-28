@@ -8,6 +8,8 @@ import { AU, DAY } from "./kepler.js";
 const $ = (sel) => document.querySelector(sel);
 const fmt = (x, digits = 4) =>
   x == null || !isFinite(x) ? "—" : Number(x).toLocaleString("en-US", { maximumFractionDigits: digits });
+// null is a genuinely pending stellar output, not numeric zero (0.4.3).
+const scaled = (x, unit) => x == null ? null : x / unit;
 
 let ctx = null;                 // {system, getTimeDays}
 let current = null;             // current body name
@@ -121,8 +123,8 @@ async function renderParams(b) {
     </div>
     <div class="sec">
       <div class="sec-title">物理</div>
-      <div class="kv"><span class="k">质量</span><span class="v">${b.kind === "star" ? fmt(b.mass_kg / 1.98847e30, 4) + " M☉" : fmt(b.mass_kg / 5.9722e24, 3) + " M⊕"}</span></div>
-      <div class="kv"><span class="k">半径</span><span class="v">${b.kind === "star" ? fmt(b.radius_m / 6.957e8, 4) + " R☉" : fmt(b.radius_m / 6.371e6, 4) + " R⊕"}</span></div>
+      <div class="kv"><span class="k">质量</span><span class="v">${b.kind === "star" ? fmt(scaled(b.mass_kg, 1.98847e30), 4) + " M☉" : fmt(b.mass_kg / 5.9722e24, 3) + " M⊕"}</span></div>
+      <div class="kv"><span class="k">半径</span><span class="v">${b.kind === "star" ? fmt(scaled(b.radius_m, 6.957e8), 4) + " R☉" : fmt(b.radius_m / 6.371e6, 4) + " R⊕"}</span></div>
       ${b.rotation_period_s ? `<div class="kv"><span class="k">自转周期</span><span class="v">${fmt(b.rotation_period_s / 3600, 1)} h</span></div>` : ""}
       <div class="kv"><span class="k">自转轴</span><span class="v mono">[${(b.spin_axis ?? [0, 0, 1]).map((x) => Number(x).toFixed(3)).join(", ")}]</span></div>
       <div class="kv"><span class="k">自转角速度</span><span class="v">${Number(b.spin_rate_rad_s ?? 0).toExponential(3)} rad/s</span></div>
@@ -522,8 +524,8 @@ function renderIntro(b) {
       <h4>${b.name}</h4>
       <p>${kindLabel},瞬时轨道相对系统质心。</p>
       ${osc && T ? `<p>瞬时半长轴约 ${fmt(osc.a_m / AU, 2)} AU,周期约 ${fmt(T / 365.25, 2)} 年(N-body 实时状态,非固定轨道)。</p>` : ""}
-      <p>质量约 ${b.kind === "star" ? fmt(b.mass_kg / 1.98847e30, 2) + " M☉" : fmt(b.mass_kg / 5.9722e24, 2) + " M⊕"},
-      半径约 ${b.kind === "star" ? fmt(b.radius_m / 6.957e8, 3) + " R☉" : fmt(b.radius_m / 6.371e6, 4) + " R⊕"}。</p>
+      <p>质量约 ${b.kind === "star" ? fmt(scaled(b.mass_kg, 1.98847e30), 2) + " M☉" : fmt(b.mass_kg / 5.9722e24, 2) + " M⊕"},
+      半径约 ${b.kind === "star" ? fmt(scaled(b.radius_m, 6.957e8), 3) + " R☉" : fmt(b.radius_m / 6.371e6, 4) + " R⊕"}。</p>
       ${b.extra?.teff_k ? `<p>有效温度约 ${fmt(b.extra.teff_k, 0)} K。</p>` : ""}
       <h4>说明</h4>
       <p>本文档由引擎参数自动生成;接入 LLM 叙事层后,将在此生成完整的世界观

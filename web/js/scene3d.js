@@ -368,7 +368,6 @@ export class OrbitScene {
       for (const [n, b] of Object.entries(snap.bodies ?? {})) p[n] = b.p;
       this.setPose(p, snap.t_days);
     }
-    this._starBase = this._starBase ?? {};      // first snapshot = scale baseline
     this.updateStars(snap);
   }
 
@@ -438,7 +437,10 @@ export class OrbitScene {
   }
 
   /** Stellar evolution made visible: swell + redden stars relative to the
-   *  first snapshot's MIST radius/Teff (display-scale factor and colour). */
+   *  radius used to build each sphere (display-scale factor and colour).
+   *  A cold boot may build a pending star at the 1e6 m safety floor; scaling
+   *  against that GEOMETRY radius lets the first valid snapshot restore its
+   *  true size instead of locking the floor in as the evolution baseline. */
   updateStars(snap) {
     if (!snap.stars) return;
     // the point light is positioned at the PRIMARY star (see update()) - its
@@ -448,10 +450,17 @@ export class OrbitScene {
     for (const b of this.system.bodies) {
       if (b.kind !== "star") continue;
       const st = snap.stars[b.name];
-      if (!st || !(st.radius_m > 0) || !Number.isFinite(st.radius_m)) continue;
-      const base = this._starBase[b.name] ?? (this._starBase[b.name] = st.radius_m);
+      if (!st || st.properties_ready === false ||
+          !(st.radius_m > 0) || !Number.isFinite(st.radius_m)) continue;
+      const base = this.displayRadii[b.name];
       const g = this.bodyGroups[b.name];
       if (g) g.scale.setScalar(Math.max(st.radius_m / base, 1e-3));
+      // Fill the boot-time catalog once staged stellar grids become ready;
+      // panels must never keep showing the MIST seed as the current mass.
+      b.mass_kg = st.mass_kg;
+      b.radius_m = st.radius_m;
+      b.luminosity_w = st.luminosity_w;
+      b.properties_ready = true;
       const c = teffColor(st.teff_k ?? 5772);
       const previousTeff = b.extra?.teff_k;
       b.extra = { ...(b.extra ?? {}), teff_k: st.teff_k };
