@@ -1,8 +1,10 @@
 /* Live observation mode. Reuses the workshop palette and panel primitives. */
 .mode-live #body-labels,
+.mode-live #point-labels,
 .mode-live #axis-gizmo,
 .mode-live #view-toggle,
-.mode-live #btn-grid { display: none; }
+.mode-live #btn-grid,
+.mode-live #btn-labels { display: none; }
 .live-sky-hud { position: absolute; inset: 0; pointer-events: none; }
 .live-sky-hud[hidden] { display: none; }
 .live-sky-title { position: absolute; left: 16px; top: 14px; padding: 7px 11px;

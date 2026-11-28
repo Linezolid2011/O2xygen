@@ -1,19 +1,23 @@
 """Isolate which scene object fills the viewport by toggling visibility.
 
 Current scene graph (post ADR-0010/0016/0017): body spheres + star glow
-sprites + smoke-trail lines + (optional) reference grid. No starfield, no
-orbit lines - those are gone.
+sprites + smoke-trail lines. The ecliptic reference grid was retired in
+branch 2; the surface overlay (graticule + observation dots) is a per-body
+mesh child, not a scene-level object.
 """
 import time
+from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 VARIANTS = [
     ("all-on", ""),
     ("no-glow", "s.traverse(o=>{if(o.isSprite)o.visible=false;})"),
     ("no-trails", "Object.values(w.trailByName).forEach(t=>t.line.visible=false)"),
-    ("grid-on", "w.grid.visible=true"),
-    ("bodies-only", "s.traverse(o=>{if(o.isSprite)o.visible=false;}); Object.values(w.trailByName).forEach(t=>t.line.visible=false); w.grid.visible=false"),
+    ("overlay-on", "w.setSurfaceOverlay(true)"),
+    ("bodies-only", "s.traverse(o=>{if(o.isSprite)o.visible=false;}); Object.values(w.trailByName).forEach(t=>t.line.visible=false)"),
 ]
+
+OUT = Path(__file__).resolve().parents[1] / "shots"
 
 with sync_playwright() as p:
     b = p.chromium.launch(channel="chrome", headless=True,
@@ -25,12 +29,12 @@ with sync_playwright() as p:
         pg.evaluate(f"""() => {{
             const w = window.__scene, s = w.scene;
             s.traverse(o => o.visible = true);
-            w.grid.visible = false;
+            w.setSurfaceOverlay(false);
             Object.values(w.trailByName).forEach(t => t.line.visible = true);
             {js}
             w.render();
         }}""")
         time.sleep(0.3)
-        pg.screenshot(path=rf"D:\test3\o2xygen\shots\dbg-{name}.png")
+        pg.screenshot(path=str(OUT / f"dbg-{name}.png"))
         print("saved", name)
     b.close()

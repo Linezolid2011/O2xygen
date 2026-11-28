@@ -15,6 +15,9 @@ const _Z_AXIS = new THREE.Vector3(0, 0, 1);
 const _spinAxis = new THREE.Vector3();
 const _qAlign = new THREE.Quaternion();
 const _qSpin = new THREE.Quaternion();
+const _vRef = new THREE.Vector3();      // surface-overlay alignment scratch
+const _qPre = new THREE.Quaternion();
+const _qInv = new THREE.Quaternion();
 function glowTexture() {
   if (texLoaderCache.glow) return texLoaderCache.glow;
   const c = document.createElement("canvas");
@@ -133,8 +136,17 @@ export class OrbitScene {
     // (positioned relative to the Solar System) will be integrated later.
     this.buildBodies();
     this.buildTrails();
-    this.buildGrid();
+    // branch 2: surface overlay (real body-fixed lat/lon graticule +
+    // observation-point dots) replaces the retired ecliptic reference grid.
+    this.surfaceOverlayVisible = false;
+    this.labelsVisible = true;
+    this.overlayGroups = {};      // body name -> overlay group (child of the body MESH)
+    this.overlayAxisCache = {};   // body name -> spin axis the overlay was aligned to
+    this.pointDots = {};          // point name -> dot mesh
+    this.pointLabelDivs = {};     // point name -> label div
+    this.buildSurfaceOverlay();
     this.labelsEl = document.getElementById("body-labels");
+    this.pointLabelsEl = document.getElementById("point-labels");
     this.buildLabels();
 
     // picking
@@ -441,13 +453,105 @@ export class OrbitScene {
     if (appearanceChanged && this.trailCount >= 2) this._refreshTrails();
   }
 
-  buildGrid() {
-    this.grid = new THREE.GridHelper(AU * 30, 30, 0x2a3040, 0x1a1e2a);
-    this.grid.rotation.x = Math.PI / 2;      // ecliptic plane = XY
-    this.grid.material.transparent = true;
-    this.grid.material.opacity = 0.25;
-    this.grid.visible = false;
-    this.scene.add(this.grid);
+  /** branch 2: one overlay group per non-stellar body, attached as a child of
+   *  the body MESH so it inherits qAlign*qSpin — the graticule and dots are
+   *  material surface features and rotate with the body (user ruling: the
+   *  grid must be real and spin-locked). The retired ecliptic GridHelper is
+   *  gone entirely. */
+  buildSurfaceOverlay() {
+    for (const b of this.system.bodies) {
+      if (b.kind === "star") continue;
+      const R = this.displayRadii[b.name];
+      const g = new THREE.Group();
+      g.visible = false;
+      g.add(new THREE.LineSegments(
+        this._graticuleGeometry(R * 1.002),
+        new THREE.LineBasicMaterial({
+          color: 0x93a4bd, transparent: true, opacity: 0.32, depthWrite: false,
+        })));
+      this.bodyMeshes[b.name].add(g);
+      this.overlayGroups[b.name] = g;
+    }
+  }
+
+  /** Meridians every 30°, parallels every 30° (poles excluded). Overlay-local
+   *  frame: pole = +Y, longitude 0°E = +Z, 90°E = +X — a right-handed frame
+   *  matching observation.py local_frame (east = axis × zenith). */
+  _graticuleGeometry(R) {
+    const pts = [];
+    const push = (latDeg, lonDeg) => {
+      const lat = latDeg * Math.PI / 180, lon = lonDeg * Math.PI / 180;
+      const cl = Math.cos(lat);
+      pts.push(R * cl * Math.sin(lon), R * Math.sin(lat), R * cl * Math.cos(lon));
+    };
+    const SEG = 96;
+    for (let lon = 0; lon < 360; lon += 30) {
+      for (let i = 0; i < SEG; i++) {
+        push(-90 + 180 * i / SEG, lon);
+        push(-90 + 180 * (i + 1) / SEG, lon);
+      }
+    }
+    for (let lat = -60; lat <= 60; lat += 30) {
+      for (let i = 0; i < SEG; i++) {
+        push(lat, 360 * i / SEG);
+        push(lat, 360 * (i + 1) / SEG);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    return geo;
+  }
+
+  /** (Re)build observation-point dots + labels from [{name, body,
+   *  latitude_deg, longitude_deg}] (GET /api/observations, schema v3). */
+  setObservations(points) {
+    for (const g of Object.values(this.overlayGroups)) {
+      for (let i = g.children.length - 1; i >= 1; i--) g.remove(g.children[i]);
+    }
+    if (this.pointLabelsEl) this.pointLabelsEl.textContent = "";   // drop old divs
+    this.pointDots = {};
+    this.pointLabelDivs = {};
+    const byBody = {};
+    for (const p of points ?? []) (byBody[p.body] ??= []).push(p);
+    for (const [body, list] of Object.entries(byBody)) {
+      const g = this.overlayGroups[body];
+      if (!g) continue;                 // points exist only on non-stellar bodies
+      const R = this.displayRadii[body];
+      const dotR = R * 0.016;           // drawn to scale (ADR-0017), no floor
+      for (const p of list) {
+        const lat = p.latitude_deg * Math.PI / 180, lon = p.longitude_deg * Math.PI / 180;
+        const cl = Math.cos(lat), rr = R * 1.004;
+        const dot = new THREE.Mesh(
+          new THREE.SphereGeometry(dotR, 10, 8),
+          new THREE.MeshBasicMaterial({ color: 0xff5a5a }));
+        // same overlay-local parametrization as the graticule above
+        dot.position.set(rr * cl * Math.sin(lon), rr * Math.sin(lat),
+                         rr * cl * Math.cos(lon));
+        g.add(dot);
+        this.pointDots[p.name] = dot;
+        const div = document.createElement("div");
+        div.className = "point-label";
+        div.textContent = p.name;       // user-supplied names: textContent only
+        this.pointLabelsEl?.appendChild(div);
+        this.pointLabelDivs[p.name] = div;
+      }
+    }
+  }
+
+  /** Fixed per-body pre-rotation that turns the overlay's local +Z prime
+   *  meridian onto the body's material 0°E direction: world +X projected
+   *  onto the equatorial plane (fallback +Y when +X is the pole), exactly
+   *  the reference construction of observation.py local_frame. The overlay
+   *  is a MESH child (quaternion qAlign*qSpin); qPre also turns about the
+   *  local pole, so qSpin and qPre commute and the product qAlign*qSpin*qPre
+   *  matches the server frame at any spin phase. */
+  _overlayPreQuaternion(axis) {
+    _vRef.set(1, 0, 0).addScaledVector(axis, -axis.x);
+    if (_vRef.lengthSq() < 1e-12) _vRef.set(0, 1, 0).addScaledVector(axis, -axis.y);
+    _vRef.normalize();
+    _qAlign.setFromUnitVectors(_Y_AXIS, axis);
+    _vRef.applyQuaternion(_qInv.copy(_qAlign).invert());
+    return _qPre.setFromAxisAngle(_Y_AXIS, Math.atan2(_vRef.x, _vRef.z));
   }
 
   buildLabels() {
@@ -576,7 +680,24 @@ export class OrbitScene {
     this.controls.update();
   }
 
-  toggleGrid() { this.grid.visible = !this.grid.visible; }
+  /** branch 2: the old ecliptic grid is retired; this button now controls the
+   *  spin-locked surface graticule + observation-point dots on non-stellar
+   *  bodies (view and edit modes). */
+  setSurfaceOverlay(on) {
+    this.surfaceOverlayVisible = on;
+    for (const g of Object.values(this.overlayGroups)) g.visible = on;
+    return on;
+  }
+
+  toggleSurfaceOverlay() { return this.setSurfaceOverlay(!this.surfaceOverlayVisible); }
+
+  /** branch 2: body labels and observation-point labels share one toggle. */
+  setLabelsVisible(on) {
+    this.labelsVisible = on;
+    return on;
+  }
+
+  toggleLabels() { return this.setLabelsVisible(!this.labelsVisible); }
 
   /** Absolute position of a body from the latest server pose (SSE), falling
    *  back to the latest poll snapshot before the first pose arrives. */
@@ -640,6 +761,17 @@ export class OrbitScene {
       _qSpin.setFromAxisAngle(_Y_AXIS, phase);
       const m = this.bodyMeshes[b.name];
       m.quaternion.copy(_qAlign).multiply(_qSpin);
+      const ov = this.overlayGroups[b.name];
+      if (ov) {
+        // align the body-fixed lat/lon frame; only recompute when the spin
+        // axis itself changes (edit-mode spin edits arrive via the meta poll)
+        const ax = _spinAxis.toArray();
+        const c = this.overlayAxisCache[b.name];
+        if (!c || c[0] !== ax[0] || c[1] !== ax[1] || c[2] !== ax[2]) {
+          this.overlayAxisCache[b.name] = ax;
+          ov.quaternion.copy(this._overlayPreQuaternion(_spinAxis));
+        }
+      }
       const ring = this.ringMeshes[b.name];
       if (ring) ring.quaternion.setFromUnitVectors(_Z_AXIS, _spinAxis);
       if (b.kind !== "star") this._updateBodyLighting(b);
@@ -657,8 +789,29 @@ export class OrbitScene {
     const v = new THREE.Vector3();
     for (const [name, div] of Object.entries(this.labelDivs)) {
       const g = this.bodyGroups[name];
-      if (!g) continue;
+      if (!g || !this.labelsVisible) { div.style.display = "none"; continue; }
       v.copy(g.position).project(this.camera);
+      if (v.z > 1) { div.style.display = "none"; continue; }
+      div.style.display = "block";
+      div.style.left = `${(v.x * 0.5 + 0.5) * rect.width}px`;
+      div.style.top = `${(-v.y * 0.5 + 0.5) * rect.height}px`;
+    }
+  }
+
+  /** Observation-point name labels (branch 2): projected from each dot's
+   *  world position; visible only while both the surface overlay and the
+   *  label toggle are on. */
+  drawPointLabels() {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const v = new THREE.Vector3();
+    for (const [name, div] of Object.entries(this.pointLabelDivs)) {
+      const dot = this.pointDots[name];
+      if (!dot || !this.surfaceOverlayVisible || !this.labelsVisible) {
+        div.style.display = "none";
+        continue;
+      }
+      dot.getWorldPosition(v);
+      v.project(this.camera);
       if (v.z > 1) { div.style.display = "none"; continue; }
       div.style.display = "block";
       div.style.left = `${(v.x * 0.5 + 0.5) * rect.width}px`;
@@ -732,6 +885,7 @@ export class OrbitScene {
     }
     this.renderer.render(this.scene, this.camera);
     this.drawLabels();
+    this.drawPointLabels();
     this.drawGizmo();
   }
 }

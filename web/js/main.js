@@ -89,6 +89,9 @@ async function boot() {
   window.__scene = scene;      // debug/test hook
   const surface = new SurfaceSky(scene.renderer, $("#gl"), system);
   window.__surface = surface;  // observer-local renderer, never a physics clock
+  // branch 2: observation points shown on non-stellar surfaces (schema v3);
+  // refreshed whenever (re)entering view/edit after live-mode edits
+  scene.setObservations(system.observations);
   let live = null;
   let atmosphereSerial = 0;
   const bodyEditor = initBodyEditor({
@@ -210,7 +213,14 @@ async function boot() {
   $("#btn-focus").addEventListener("click", () => {
     if (appMode === "live") surface.home(); else scene.focusSelected();
   });
-  $("#btn-grid").addEventListener("click", () => scene.toggleGrid());
+  $("#btn-grid").addEventListener("click", () => {
+    if (appMode === "live") return;   // hidden there anyway
+    $("#btn-grid").classList.toggle("on", scene.toggleSurfaceOverlay());
+  });
+  $("#btn-labels").addEventListener("click", () => {
+    if (appMode === "live") return;   // hidden there anyway
+    $("#btn-labels").classList.toggle("on", scene.toggleLabels());
+  });
   $("#btn-stars").addEventListener("click", () => {
     if (appMode === "live") surface.toggleStars(); else scene.toggleStars();
   });
@@ -453,6 +463,13 @@ async function boot() {
         $("#btn-focus").title = "回到观察点天顶 (Home)";
       } else {
         $("#btn-focus").title = "聚焦选中天体";
+        // points may have been added/renamed in live mode: refresh the
+        // surface overlay before the user sees view/edit again
+        try {
+          const r = await api.observations();
+          system.observations = r.points;
+          scene.setObservations(r.points);
+        } catch { /* keep the boot-time points on a transient failure */ }
         if (selected) await select(selected, false);
       }
       lockWorldUI(false);            // add point is enabled ONLY in live

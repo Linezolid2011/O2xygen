@@ -72,11 +72,13 @@
       </div>
       <div id="view-actions">
         <button class="icon-btn" id="btn-focus" title="聚焦选中天体">⌖</button>
-        <button class="icon-btn" id="btn-grid" title="参考网格">▦</button>
-        <button class="icon-btn" id="btn-stars" title="真实星场 (Hipparcos)">✦</button>
+        <button class="icon-btn" id="btn-grid" title="非恒星表面经纬网 + 观察点 (随自转)">▦</button>
+        <button class="icon-btn on" id="btn-labels" title="天体 / 观察点标签">Aa</button>
+        <button class="icon-btn on" id="btn-stars" title="真实星场 (Hipparcos)">✦</button>
       </div>
       <div id="axis-gizmo"><canvas id="gizmo-canvas" width="72" height="72"></canvas></div>
       <div id="body-labels"></div>
+      <div id="point-labels"></div>
       <div id="view-hint">左键旋转 · 右键平移 · 滚轮缩放 · 点击天体选中</div>
       <section id="star-editor" class="editor-overlay" hidden>
         <div class="editor-head">
